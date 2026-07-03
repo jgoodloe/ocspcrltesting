@@ -1,0 +1,45 @@
+# systemd unit for non-Docker deployment.
+#
+# Install:
+#   sudo mkdir -p /opt/ocsp-testing-web && sudo chown ocspweb: /opt/ocsp-testing-web
+#   sudo -u ocspweb git clone https://github.com/jgoodloe/ocspcrltesting /opt/ocsp-testing-web
+#   cd /opt/ocsp-testing-web
+#   sudo -u ocspweb python3 -m venv .venv
+#   sudo -u ocspweb .venv/bin/pip install -r backend/requirements.txt
+#   (cd frontend && npm ci && npm run build)
+#   sudo cp .env.example /etc/ocsp-testing-web.env   # then edit
+#   sudo cp deploy/ocsp-testing-web.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now ocsp-testing-web
+
+[Unit]
+Description=OCSP Testing Web (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=ocspweb
+Group=ocspweb
+WorkingDirectory=/opt/ocsp-testing-web
+EnvironmentFile=-/etc/ocsp-testing-web.env
+Environment=OCSPWEB_DATA_DIR=/var/lib/ocsp-testing-web
+ExecStart=/opt/ocsp-testing-web/.venv/bin/gunicorn backend.app.main:app \
+    -k uvicorn.workers.UvicornWorker \
+    -w 1 \
+    -b 127.0.0.1:8000 \
+    --timeout 120 \
+    --graceful-timeout 30 \
+    --forwarded-allow-ips 127.0.0.1
+Restart=on-failure
+RestartSec=3
+
+# Hardening
+StateDirectory=ocsp-testing-web
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/ocsp-testing-web
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,253 @@
+# OCSP Testing Web — API Reference
+
+All endpoints are rooted at the configurable base path (default `/`, e.g. `/ocsp`
+behind a subpath reverse proxy). Paths below are relative to that base.
+
+Authentication: when `OCSPWEB_AUTH_PASSWORD` is set, every endpoint (including
+WebSocket/SSE) requires HTTP Basic auth with user `OCSPWEB_AUTH_USERNAME`
+(default `admin`) and that password. Otherwise the API is open (intended for
+trusted internal networks only).
+
+Content type is `application/json` unless noted. Errors use a consistent envelope:
+
+```json
+{ "detail": "human readable message" }
+```
+
+Validation errors from FastAPI may return the standard 422 structure.
+
+---
+
+## Health and metadata
+
+### `GET /api/health`
+Liveness/readiness probe. No auth required.
+
+```json
+{ "status": "ok", "database": "ok", "openssl": "3.0.13", "time": "2026-07-03T12:00:00Z" }
+```
+
+### `GET /api/version`
+
+```json
+{ "name": "ocsp-testing-web", "version": "1.0.0", "engine": "ocsp_tester" }
+```
+
+---
+
+## Certificate inspection
+
+### `POST /api/certificates/inspect`
+`multipart/form-data` with a single field `file`. Accepts PEM or DER
+certificates. Returns parsed metadata (used by the UI to preview uploads).
+
+Response `200`:
+
+```json
+{
+  "subject": "CN=Example Leaf,O=Example",
+  "issuer": "CN=Example CA,O=Example",
+  "serial_number": "0x0A1B2C",
+  "not_before": "2025-01-01T00:00:00Z",
+  "not_after": "2027-01-01T00:00:00Z",
+  "key_algorithm": "RSA-2048",
+  "signature_algorithm": "sha256WithRSAEncryption",
+  "signature_algorithm_oid": "1.2.840.113549.1.1.11",
+  "ski": "ab:cd:...",
+  "aki": "12:34:...",
+  "aia_ocsp_urls": ["http://ocsp.example.com"],
+  "aia_ca_issuers": ["http://crl.example.com/ca.p7c"],
+  "crl_distribution_points": ["http://crl.example.com/ca.crl"],
+  "is_ca": false,
+  "expired": false,
+  "self_signed": false
+}
+```
+
+Errors: `400` when the file is not a parseable PEM/DER certificate,
+`413` when it exceeds `OCSPWEB_MAX_UPLOAD_BYTES`.
+
+---
+
+## Test runs
+
+### `POST /api/test-runs`
+Starts a test run. `multipart/form-data`:
+
+| field | type | required | notes |
+|---|---|---|---|
+| `config` | JSON string | yes | see RunConfig below |
+| `issuer_cert` | file | yes | PEM or DER |
+| `good_cert` | file | no | known-good leaf |
+| `revoked_cert` | file | no | known-revoked leaf |
+| `unknown_ca_cert` | file | no | cert from a CA unknown to the responder |
+| `trust_anchor` | file | no | root/intermediate chain (PEM, may contain multiple certs) |
+| `client_cert` | file | no | TLS client certificate (PEM) |
+| `client_key` | file | no | TLS client key (PEM). Never logged, never returned. |
+
+**RunConfig JSON:**
+
+```json
+{
+  "name": "optional label",
+  "ocsp_url": "http://ocsp.example.com",
+  "crl_urls": ["http://crl.example.com/ca.crl"],
+  "request_method": "auto",          // "auto" | "get" | "post"
+  "nonce_enabled": true,
+  "nonce_length": 32,                 // 1..128, default 32 (RFC 9654)
+  "latency_samples": 5,               // 1..100
+  "enable_load_test": false,
+  "load_concurrency": 5,              // 1..64
+  "load_requests": 50,                // 1..2000
+  "timeout_seconds": 10,              // per-request, 1..120
+  "run_timeout_seconds": 900,         // whole run, 30..7200
+  "max_age_hours": 24,
+  "trust_anchor_type": "root",       // "root" | "intermediate"
+  "require_explicit_policy": false,
+  "inhibit_policy_mapping": false,
+  "categories": {
+    "protocol": true,
+    "status": true,
+    "crl": true,
+    "path_validation": true,
+    "ikev2": false,
+    "federal": false,
+    "performance": false,
+    "security": true
+  },
+  "profile_id": null                  // optional provenance marker
+}
+```
+
+Response `201`: a **RunSummary** (see below) with status `queued` or `running`.
+
+Errors: `400` invalid config/certificate, `413` upload too large,
+`422` malformed multipart, `403` when the OCSP/CRL URL is blocked by the
+SSRF policy, `429` when `OCSPWEB_MAX_CONCURRENT_RUNS` runs are active.
+
+### `GET /api/test-runs?limit=20&offset=0&status=completed`
+Lists runs, newest first. Response:
+
+```json
+{ "items": [RunSummary, ...], "total": 42 }
+```
+
+**RunSummary:**
+
+```json
+{
+  "id": "b7c9...",
+  "name": "nightly lab check",
+  "ocsp_url": "http://ocsp.example.com",
+  "status": "running",   // queued|running|completed|failed|cancelled|timed_out
+  "created_at": "...", "started_at": "...", "finished_at": null,
+  "totals": { "pass": 10, "fail": 1, "warn": 2, "skip": 3, "error": 0, "total": 16 },
+  "latency": { "median_ms": 42, "min_ms": 30, "max_ms": 95, "samples": 5 },
+  "categories": ["protocol", "status", "crl"],
+  "current_activity": "Running CRL tests",
+  "error": null
+}
+```
+
+### `GET /api/test-runs/{run_id}`
+Single RunSummary plus the sanitized run config under `"config"` (uploaded
+file names included; key material never included).
+
+### `GET /api/test-runs/{run_id}/results`
+Query params: `category`, `status` (comma-separated), `q` (search in
+name/message). Response:
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "category": "Protocol",
+      "name": "HTTP GET transport",
+      "status": "PASS",              // PASS|FAIL|WARN|SKIP|ERROR
+      "message": "GET accepted",
+      "details": { ... },             // includes responder metadata, timestamps,
+                                      // signature algorithm OID, nonce_echoed,
+                                      // rfc_refs, warnings where applicable
+      "started_at": "...", "ended_at": "...", "duration_ms": 123
+    }
+  ],
+  "total": 16
+}
+```
+
+### `GET /api/test-runs/{run_id}/logs?after_seq=0&limit=1000`
+Persisted log lines (also replayed on stream reconnect):
+
+```json
+{ "items": [ { "seq": 1, "ts": "...", "level": "INFO", "message": "..." } ], "last_seq": 431 }
+```
+
+### `GET /api/test-runs/{run_id}/export/json`
+Download; `Content-Disposition: attachment`. Full run report: summary,
+config (sanitized), results, and log lines.
+
+### `GET /api/test-runs/{run_id}/export/csv`
+CSV of results: `id,category,name,status,message,duration_ms,started_at,ended_at,details`.
+
+### `POST /api/test-runs/{run_id}/cancel`
+Cancels a queued/running run. Response: updated RunSummary. `409` if already finished.
+
+### `DELETE /api/test-runs/{run_id}`
+Deletes the run record, results, logs and its upload workspace. `204`.
+
+---
+
+## Live stream
+
+### `WS /api/test-runs/{run_id}/stream?after_seq=0`
+WebSocket. Server pushes JSON events; on connect, events with `seq >
+after_seq` are replayed from persistence, then live events follow. The same
+event schema is used for SSE.
+
+### `GET /api/test-runs/{run_id}/stream/sse` (`text/event-stream`)
+SSE fallback. `Last-Event-ID` (or `?after_seq=`) resumes. Each SSE `id:` is
+the event `seq`.
+
+**Event envelope:**
+
+```json
+{ "seq": 17, "type": "log", "run_id": "...", "data": { ... } }
+```
+
+| type | data |
+|---|---|
+| `log` | `{ "ts", "level", "message" }` |
+| `progress` | `{ "current_activity", "categories_done", "categories_total", "percent" }` |
+| `result` | one result object (same shape as `/results` items) |
+| `run_status` | RunSummary (sent on state transitions and as final event) |
+
+A `run_status` event with a terminal `status` is always the last event.
+
+---
+
+## Profiles
+
+Saved test configurations. Profiles never store certificate/key material —
+only the run options and OCSP/CRL URLs; certificates are (re)uploaded per run.
+
+### `GET /api/profiles`
+`{ "items": [Profile, ...] }`
+
+### `POST /api/profiles`
+
+```json
+{ "name": "Lab responder", "description": "optional", "config": RunConfig-without-profile_id }
+```
+
+Response `201` Profile:
+
+```json
+{ "id": 3, "name": "...", "description": "...", "config": { ... },
+  "created_at": "...", "updated_at": "..." }
+```
+
+### `PUT /api/profiles/{profile_id}` — same body as POST, response Profile.
+### `DELETE /api/profiles/{profile_id}` — `204`.
+
+`409` on duplicate profile name.

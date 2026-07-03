@@ -1,0 +1,7 @@
+# Core dependencies for the OCSP test engine (ocsp_tester package)
+cryptography>=42.0.0,<45.0.0
+requests>=2.31.0,<3.0.0
+asn1crypto>=1.5.1,<2.0.0
+
+# Web application (FastAPI backend) dependencies live in backend/requirements.txt
+-r backend/requirements.txt

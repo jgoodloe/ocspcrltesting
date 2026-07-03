@@ -1,0 +1,17 @@
+# OCSP test engine dependencies (kept in sync with the original project)
+cryptography>=42.0.0,<45.0.0
+requests>=2.31.0,<3.0.0
+asn1crypto>=1.5.1,<2.0.0
+
+# Web framework
+fastapi>=0.115.0,<1.0.0
+uvicorn[standard]>=0.30.0,<1.0.0
+gunicorn>=22.0.0,<24.0.0
+pydantic>=2.7.0,<3.0.0
+pydantic-settings>=2.3.0,<3.0.0
+python-multipart>=0.0.9,<1.0.0
+
+# Persistence
+SQLAlchemy>=2.0.30,<3.0.0
+aiosqlite>=0.20.0,<1.0.0
+aiofiles>=23.2.0,<25.0.0
