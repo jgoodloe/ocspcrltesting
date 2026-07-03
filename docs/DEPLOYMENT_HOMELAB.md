@@ -15,10 +15,12 @@ is tracked in issue #5 but is not wired up yet.)
   # =======================================================
 
   ocsp-testing:
-    # No published image yet — compose builds straight from the repo.
-    # (Or clone locally and use `build: ./ocspcrltesting`, or push your own
-    # image to a registry and swap this for `image:`.)
-    build: https://github.com/jgoodloe/ocspcrltesting.git#main
+    # Prebuilt by CI (.github/workflows/build.yml) on every push to main,
+    # for amd64 and arm64. If the GHCR package is private, either make it
+    # public (repo → Packages → package settings) or `docker login ghcr.io`
+    # on the host. To build from source instead, replace `image:` with
+    # `build: https://github.com/jgoodloe/ocspcrltesting.git#main`.
+    image: ghcr.io/jgoodloe/ocspcrltesting:latest
     container_name: ocsp-testing
     restart: unless-stopped
     healthcheck:
