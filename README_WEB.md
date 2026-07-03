@@ -105,6 +105,7 @@ Everything is environment-driven (`OCSPWEB_*`); see
 
 - [docs/API.md](docs/API.md) — REST/WebSocket/SSE contract
 - [docs/DEPLOYMENT_NGINX.md](docs/DEPLOYMENT_NGINX.md) — nginx root/subpath, systemd, gunicorn
+- [docs/DEPLOYMENT_HOMELAB.md](docs/DEPLOYMENT_HOMELAB.md) — single compose file + Nginx Proxy Manager
 - [docs/SECURITY.md](docs/SECURITY.md) — SSRF policy, auth, key handling
 - [docs/PATH_VALIDATION_TESTS.md](docs/PATH_VALIDATION_TESTS.md) — engine path-validation test reference
 
