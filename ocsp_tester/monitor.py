@@ -35,7 +35,7 @@ class OCSPMonitor:
         if config and hasattr(config, 'max_age_hours'):
             self.max_age_hours = config.max_age_hours
         
-        self.log(f"[INFO] OCSPMonitor v{self.VERSION} initialized\n")
+        self.log(f"[DEBUG] OCSPMonitor v{self.VERSION} initialized\n")
         
     def log(self, text: str) -> None:
         """Log message using callback"""
@@ -6614,9 +6614,6 @@ INVALID_ISSUER_CERTIFICATE_DATA
         
         try:
             self.log(f"[OCSP-SIGNATURE] Validating OCSP response signature using signer certificate\n")
-            
-            # Create temporary file for signer certificate
-            import tempfile
             
             # Save signer certificate to temporary file
             with tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False) as f:

@@ -32,6 +32,7 @@ from ocsp_tester.tests_status import run_status_tests
 from ..ssrf import BlockedTargetError, NetworkPolicy, validate_url
 from . import diagnostics, netguard
 from .analysis import enrich_result
+from .loglevels import split_level_prefix
 
 Emit = Callable[[str, Dict[str, Any]], None]
 
@@ -99,7 +100,8 @@ class RunExecutor:
         self.emit("log", {"level": level, "message": message})
 
     def _engine_log(self, message: str) -> None:
-        self.log("INFO", message.rstrip("\n"))
+        level, text = split_level_prefix(message.rstrip("\n"))
+        self.log(level, text)
 
     def _check_cancel(self) -> None:
         if (self.run_dir / "cancel").exists():
@@ -236,6 +238,7 @@ class RunExecutor:
                 self.files.get("client_cert"),
                 self.files.get("client_key"),
                 engine_cfg,
+                log_callback=self._engine_log,
             ),
             "performance": lambda: run_perf_tests(
                 ocsp_url,

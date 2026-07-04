@@ -23,11 +23,19 @@ import tempfile
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
+
+import requests
+from asn1crypto import cms as asn1_cms
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.exceptions import InvalidSignature
 from cryptography.x509.oid import NameOID, ExtensionOID, CertificatePoliciesOID
+
+# AIA chain discovery walks at most this many issuers above the supplied
+# issuer certificate. Deep Federal Bridge paths are legitimate, so this is a
+# generous runaway guard — cycles are detected explicitly, not via the cap.
+MAX_CHAIN_DEPTH = 8
 
 from .models import TestCaseResult, TestStatus
 from .ocsp_client import send_ocsp_request, OCSPRequestSpec
@@ -62,6 +70,12 @@ class PathValidationTestSuite:
         self.test_results: List[TestCaseResult] = []
         self.log_callback = log_callback
         self.temp_files: List[str] = []
+        # AIA download cache: cross-certified bridge topologies reference the
+        # same P7C repeatedly; fetch each URL once per run.
+        self._aia_cert_cache: Dict[str, Optional[x509.Certificate]] = {}
+        # How the last AIA chain discovery ended ("root", "anchor", "cycle",
+        # "depth", "no-aia", "download-failed", "mismatch").
+        self.last_chain_termination: Optional[str] = None
     
     def cleanup_temp_files(self):
         """Clean up temporary files created during testing"""
@@ -913,211 +927,237 @@ class PathValidationTestSuite:
             return []
     
     def _download_certificate_from_url(self, url: str) -> Optional[x509.Certificate]:
-        """Download and parse a certificate from a URL"""
+        """Download and parse a certificate (X.509 or PKCS#7 bundle) from a URL.
+
+        Results (including failures) are cached for the run — cross-certified
+        bridge topologies reference the same P7C repeatedly. The parser order
+        is chosen from the URL extension / Content-Type so the common case
+        parses on the first attempt; individual parser misses are only
+        reported when every parser fails.
+        """
+        if url in self._aia_cert_cache:
+            _log_debug(f"Using cached AIA download for: {url}", self.log_callback)
+            return self._aia_cert_cache[url]
+        certificate = self._download_certificate_uncached(url)
+        self._aia_cert_cache[url] = certificate
+        return certificate
+
+    @staticmethod
+    def _parse_pkcs7_certificate(cert_data: bytes) -> x509.Certificate:
+        content_info = asn1_cms.ContentInfo.load(cert_data)
+        content_type = content_info['content_type'].dotted
+        if content_type != '1.2.840.113549.1.7.2':
+            raise ValueError(f"PKCS#7 content type is not SignedData: {content_type}")
+        certificates = content_info['content']['certificates']
+        if not certificates:
+            raise ValueError("no certificates found in PKCS#7 SignedData")
+        return x509.load_der_x509_certificate(certificates[0].dump())
+
+    @staticmethod
+    def _parse_embedded_pem_certificate(cert_data: bytes) -> x509.Certificate:
+        start = cert_data.find(b'-----BEGIN CERTIFICATE-----')
+        if start == -1:
+            raise ValueError("no embedded PEM certificate found")
+        end = cert_data.find(b'-----END CERTIFICATE-----', start)
+        if end == -1:
+            raise ValueError("unterminated embedded PEM certificate")
+        end += len(b'-----END CERTIFICATE-----')
+        return x509.load_pem_x509_certificate(cert_data[start:end])
+
+    @staticmethod
+    def _parse_pkcs7_via_openssl(cert_data: bytes) -> x509.Certificate:
+        """Last-resort PKCS#7 extraction for encodings asn1crypto rejects."""
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.p7c') as temp_file:
+            temp_file.write(cert_data)
+            temp_path = temp_file.name
         try:
-            import requests
+            result = subprocess.run(
+                ['openssl', 'pkcs7', '-inform', 'DER', '-in', temp_path, '-print_certs', '-outform', 'PEM'],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode != 0 or not result.stdout:
+                raise ValueError(f"openssl pkcs7 failed: {(result.stderr or '').strip()[:200]}")
+            marker = '-----BEGIN CERTIFICATE-----'
+            start = result.stdout.find(marker)
+            if start == -1:
+                raise ValueError("openssl produced no certificates")
+            end = result.stdout.find('-----END CERTIFICATE-----', start)
+            pem = result.stdout[start:end] + '-----END CERTIFICATE-----'
+            return x509.load_pem_x509_certificate(pem.encode())
+        finally:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+    def _download_certificate_uncached(self, url: str) -> Optional[x509.Certificate]:
+        try:
             _log_debug(f"Downloading certificate from: {url}", self.log_callback)
-            
             response = requests.get(url, timeout=30)
             response.raise_for_status()
-            
             cert_data = response.content
+            content_type = str(response.headers.get('Content-Type', '')).lower()
             _log_debug(f"Downloaded {len(cert_data)} bytes from URL", self.log_callback)
-            
-            # Try to parse as PEM first
-            try:
-                certificate = x509.load_pem_x509_certificate(cert_data)
-                _log_debug("Certificate downloaded and parsed as PEM", self.log_callback)
-                _log_debug(f"Certificate subject: {certificate.subject}", self.log_callback)
-                return certificate
-            except Exception as e:
-                _log_debug(f"PEM parsing failed: {str(e)}", self.log_callback)
-            
-            # Try to parse as DER
-            try:
-                certificate = x509.load_der_x509_certificate(cert_data)
-                _log_debug("Certificate downloaded and parsed as DER", self.log_callback)
-                _log_debug(f"Certificate subject: {certificate.subject}", self.log_callback)
-                return certificate
-            except Exception as e:
-                _log_debug(f"DER parsing failed: {str(e)}", self.log_callback)
-            
-            # Try to parse as PKCS#7 (P7C) using asn1crypto library
-            try:
-                from asn1crypto import cms
-                import base64
-                
-                _log_debug("Attempting PKCS#7 parsing with asn1crypto", self.log_callback)
-                
-                # Try to parse as PKCS#7 ContentInfo
-                try:
-                    content_info = cms.ContentInfo.load(cert_data)
-                    _log_debug("ContentInfo loaded successfully", self.log_callback)
-                    _log_debug(f"Content type: {content_info['content_type'].dotted}", self.log_callback)
-                    
-                    # Check if it's a SignedData
-                    if content_info['content_type'].dotted == '1.2.840.113549.1.7.2':
-                        signed_data = content_info['content']
-                        certificates = signed_data['certificates']
-                        
-                        if certificates:
-                            # Extract the first certificate
-                            cert_der = certificates[0].dump()
-                            certificate = x509.load_der_x509_certificate(cert_der)
-                            _log_debug("Certificate extracted from PKCS#7 SignedData", self.log_callback)
-                            _log_debug(f"Certificate subject: {certificate.subject}", self.log_callback)
-                            return certificate
-                        else:
-                            _log_debug("No certificates found in PKCS#7 SignedData", self.log_callback)
-                    else:
-                        _log_debug(f"PKCS#7 content type not SignedData: {content_info['content_type'].dotted}", self.log_callback)
-                        
-                except Exception as e:
-                    _log_debug(f"PKCS#7 ContentInfo parsing failed: {str(e)}", self.log_callback)
-                    
-            except Exception as e:
-                _log_debug(f"PKCS#7 parsing with asn1crypto failed: {str(e)}", self.log_callback)
-            
-            # Try to extract certificate from raw data (sometimes certificates are embedded in other formats)
-            try:
-                # Look for certificate boundaries in the data
-                cert_start = cert_data.find(b'-----BEGIN CERTIFICATE-----')
-                if cert_start != -1:
-                    cert_end = cert_data.find(b'-----END CERTIFICATE-----', cert_start)
-                    if cert_end != -1:
-                        cert_end += len(b'-----END CERTIFICATE-----')
-                        cert_pem = cert_data[cert_start:cert_end]
-                        certificate = x509.load_pem_x509_certificate(cert_pem)
-                        print(f"[DEBUG] Certificate extracted from embedded PEM format")
-                        print(f"[DEBUG] Certificate subject: {certificate.subject}")
-                        return certificate
-            except Exception as e:
-                print(f"[DEBUG] Embedded certificate extraction failed: {str(e)}")
-            
-            # Try to use OpenSSL command line as a fallback
-            try:
-                import tempfile
-                import subprocess
-                
-                print(f"[DEBUG] Attempting OpenSSL fallback parsing")
-                
-                # Write data to temporary file
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.p7c') as temp_file:
-                    temp_file.write(cert_data)
-                    temp_file.flush()
-                    temp_path = temp_file.name
-                
-                try:
-                    # Try to convert P7C to PEM using OpenSSL
-                    result = subprocess.run([
-                        'openssl', 'pkcs7', '-inform', 'DER', '-in', temp_path, 
-                        '-print_certs', '-outform', 'PEM'
-                    ], capture_output=True, text=True, timeout=10)
-                    
-                    if result.returncode == 0 and result.stdout:
-                        # Parse the first certificate from the output
-                        pem_certs = result.stdout.split('-----BEGIN CERTIFICATE-----')
-                        if len(pem_certs) > 1:
-                            first_cert = '-----BEGIN CERTIFICATE-----' + pem_certs[1].split('-----END CERTIFICATE-----')[0] + '-----END CERTIFICATE-----'
-                            certificate = x509.load_pem_x509_certificate(first_cert.encode())
-                            print(f"[DEBUG] Certificate extracted using OpenSSL fallback")
-                            print(f"[DEBUG] Certificate subject: {certificate.subject}")
-                            return certificate
-                    else:
-                        print(f"[DEBUG] OpenSSL fallback failed: {result.stderr}")
-                        
-                finally:
-                    # Clean up temporary file
-                    import os
-                    try:
-                        os.unlink(temp_path)
-                    except:
-                        pass
-                        
-            except Exception as e:
-                _log_debug(f"OpenSSL fallback parsing failed: {str(e)}", self.log_callback)
-            
-            _log_debug(f"Failed to parse certificate from URL: {url}", self.log_callback)
-            _log_debug(f"Data preview (first 200 bytes): {cert_data[:200]}", self.log_callback)
-            _log_debug(f"Data preview (last 200 bytes): {cert_data[-200:]}", self.log_callback)
-            return None
-            
         except Exception as e:
             _log_debug(f"Error downloading certificate from {url}: {str(e)}", self.log_callback)
             return None
+
+        parsers = {
+            'PEM': x509.load_pem_x509_certificate,
+            'DER': x509.load_der_x509_certificate,
+            'PKCS#7': self._parse_pkcs7_certificate,
+            'embedded PEM': self._parse_embedded_pem_certificate,
+            'PKCS#7 (openssl)': self._parse_pkcs7_via_openssl,
+        }
+        # Order the attempts by what the payload most likely is, so the happy
+        # path parses first and the log stays free of failure noise.
+        path = url.lower().split('?', 1)[0]
+        if path.endswith(('.p7c', '.p7b')) or 'pkcs7' in content_type:
+            order = ['PKCS#7', 'PKCS#7 (openssl)', 'DER', 'PEM', 'embedded PEM']
+        elif cert_data.lstrip().startswith(b'-----BEGIN'):
+            order = ['PEM', 'embedded PEM', 'DER', 'PKCS#7', 'PKCS#7 (openssl)']
+        else:
+            order = ['DER', 'PKCS#7', 'PEM', 'embedded PEM', 'PKCS#7 (openssl)']
+
+        attempts = []
+        for name in order:
+            try:
+                certificate = parsers[name](cert_data)
+                _log_debug(f"Certificate parsed as {name}", self.log_callback)
+                _log_debug(f"Certificate subject: {certificate.subject}", self.log_callback)
+                return certificate
+            except Exception as e:
+                attempts.append(f"{name}: {str(e)[:120]}")
+
+        _log_debug(
+            f"Failed to parse certificate from {url}; attempts: " + " | ".join(attempts),
+            self.log_callback,
+        )
+        _log_debug(f"Data preview (first 100 bytes): {cert_data[:100]!r}", self.log_callback)
+        return None
     
-    def _build_certificate_chain_with_aia(self, end_entity: x509.Certificate, issuer: x509.Certificate) -> Optional[tuple]:
-        """Build complete certificate chain using AIA discovery"""
+    def _build_certificate_chain_with_aia(
+        self,
+        end_entity: x509.Certificate,
+        issuer: x509.Certificate,
+        supplied_anchors: Optional[List[x509.Certificate]] = None,
+    ) -> Optional[tuple]:
+        """Build a certificate chain using AIA discovery.
+
+        Discovery terminates at the first of: a certificate matching one of
+        the ``supplied_anchors`` (the trust anchor the user uploaded), a
+        self-signed root, a cycle (cross-certified CAs certifying each
+        other, common in Federal Bridge topologies), or ``MAX_CHAIN_DEPTH``.
+        The termination reason is stored in ``self.last_chain_termination``.
+        Only a reached root/anchor is reported as a trust anchor; otherwise
+        the chain is honestly partial and validation runs against the
+        supplied anchors (if any).
+        """
         try:
             _log_debug("Building certificate chain with AIA discovery", self.log_callback)
-            
+            anchors = supplied_anchors or []
+
+            def _key(cert: x509.Certificate):
+                return (cert.subject.rfc4514_string(), cert.serial_number)
+
             # Start with what we have
             chain = [end_entity, issuer]
+            seen = {_key(end_entity), _key(issuer)}
             current_cert = issuer
-            
-            # Follow the chain up to find root/bridge certificates
-            max_depth = 5  # Prevent infinite loops
             depth = 0
-            
-            while depth < max_depth:
+            termination = "depth"
+
+            while True:
                 _log_debug(f"Chain depth {depth}: {current_cert.subject}", self.log_callback)
                 _log_debug(f"Current cert issuer: {current_cert.issuer}", self.log_callback)
-                
+
+                # Reached the trust anchor the user actually trusts?
+                if any(_key(anchor) == _key(current_cert) for anchor in anchors):
+                    termination = "anchor"
+                    _log_debug(f"Reached the supplied trust anchor: {current_cert.subject}", self.log_callback)
+                    break
+
                 # Check if this is a self-signed certificate (root)
                 if current_cert.subject == current_cert.issuer:
+                    termination = "root"
                     _log_debug(f"Found self-signed certificate (root): {current_cert.subject}", self.log_callback)
                     break
-                
+
+                if depth >= MAX_CHAIN_DEPTH:
+                    termination = "depth"
+                    _log_debug(
+                        f"Reached maximum chain depth ({MAX_CHAIN_DEPTH}) without a trusted root",
+                        self.log_callback,
+                    )
+                    break
+
                 # Extract AIA URLs
                 aia_urls = self._extract_aia_urls(current_cert)
                 _log_debug(f"Found {len(aia_urls)} AIA URLs", self.log_callback)
-                
+
                 if not aia_urls:
+                    termination = "no-aia"
                     _log_debug("No AIA URLs found, cannot continue chain discovery", self.log_callback)
                     break
-                
+
                 # Try to download the parent certificate
                 parent_cert = None
                 for url in aia_urls:
                     _log_debug(f"Trying AIA URL: {url}", self.log_callback)
                     parent_cert = self._download_certificate_from_url(url)
                     if parent_cert:
-                        _log_debug(f"Successfully downloaded certificate from: {url}", self.log_callback)
                         break
-                    else:
-                        _log_debug(f"Failed to download certificate from: {url}", self.log_callback)
-                
+                    _log_debug(f"Failed to download certificate from: {url}", self.log_callback)
+
                 if not parent_cert:
+                    termination = "download-failed"
                     _log_debug("Could not download parent certificate from any AIA URLs", self.log_callback)
                     _log_debug(f"AIA URLs attempted: {aia_urls}", self.log_callback)
-                    _log_debug("Certificate chain discovery stopped - cannot find parent certificate", self.log_callback)
-                    # Don't break here - we might still have a valid partial chain
-                    # Continue with what we have so far
                     break
-                
+
                 # Verify the parent certificate is the issuer
-                _log_debug("Verifying certificate chain:", self.log_callback)
-                _log_debug(f"- Expected issuer: {current_cert.issuer}", self.log_callback)
-                _log_debug(f"- Downloaded certificate subject: {parent_cert.subject}", self.log_callback)
-                
                 if parent_cert.subject != current_cert.issuer:
-                    _log_debug(f"Parent certificate subject mismatch: expected {current_cert.issuer}, got {parent_cert.subject}", self.log_callback)
-                    _log_debug("This may indicate a certificate chain issue or the downloaded certificate is not the correct parent", self.log_callback)
+                    termination = "mismatch"
+                    _log_debug(
+                        f"Parent certificate subject mismatch: expected {current_cert.issuer}, got {parent_cert.subject}",
+                        self.log_callback,
+                    )
                     break
-                
-                _log_debug("Certificate chain verification successful!", self.log_callback)
-                _log_debug(f"Successfully added parent certificate to chain: {parent_cert.subject}", self.log_callback)
+
+                # Cycle detection: cross-certified CAs (e.g. two bridge CAs
+                # certifying each other) would otherwise loop forever.
+                if _key(parent_cert) in seen:
+                    termination = "cycle"
+                    _log_debug(
+                        f"Cycle detected: {parent_cert.subject} is already in the chain "
+                        "(cross-certified CAs); stopping discovery",
+                        self.log_callback,
+                    )
+                    break
+
+                _log_debug(f"Added parent certificate to chain: {parent_cert.subject}", self.log_callback)
                 chain.append(parent_cert)
+                seen.add(_key(parent_cert))
                 current_cert = parent_cert
                 depth += 1
-            
-            if depth >= max_depth:
-                _log_debug(f"Reached maximum chain depth ({max_depth})", self.log_callback)
-            
-            # Organize the chain
+
+            self.last_chain_termination = termination
+
+            # Organize the chain. Only a genuinely reached root/anchor is a
+            # trust anchor; anything else is a partial chain and validation
+            # falls back to the anchors the user supplied (possibly none).
             end_entity = chain[0]
-            intermediates = chain[1:-1] if len(chain) > 2 else []
-            trust_anchors = [chain[-1]] if len(chain) > 1 else []
+            if termination in ("root", "anchor"):
+                intermediates = chain[1:-1]
+                trust_anchors = [chain[-1]]
+            else:
+                intermediates = chain[1:]
+                trust_anchors = list(anchors)
+                _log_debug(
+                    f"Partial chain: discovery stopped ({termination}) without reaching a trusted root"
+                    + ("; validating against the supplied trust anchor" if anchors else ""),
+                    self.log_callback,
+                )
             
             _log_debug("===== CERTIFICATE CHAIN ORGANIZATION =====", self.log_callback)
             _log_debug(f"Total certificates in chain: {len(chain)}", self.log_callback)
@@ -1234,6 +1274,36 @@ class PathValidationTestSuite:
             print(f"[DEBUG] Error building certificate details: {str(e)}")
             return {"error": f"Failed to build certificate details: {str(e)}"}
     
+    def _load_supplied_trust_anchors(self, test_inputs: Dict[str, Any]) -> List[x509.Certificate]:
+        """Load the trust anchor certificate(s) the user uploaded (PEM bundle
+        or single PEM/DER cert). Returns [] when none was supplied."""
+        path = test_inputs.get('trust_anchor_path')
+        if not path:
+            return []
+        try:
+            with open(path, 'rb') as f:
+                data = f.read()
+            certs: List[x509.Certificate] = []
+            if b'-----BEGIN CERTIFICATE-----' in data:
+                index = 0
+                while True:
+                    start = data.find(b'-----BEGIN CERTIFICATE-----', index)
+                    if start == -1:
+                        break
+                    end = data.find(b'-----END CERTIFICATE-----', start)
+                    if end == -1:
+                        break
+                    end += len(b'-----END CERTIFICATE-----')
+                    certs.append(x509.load_pem_x509_certificate(data[start:end]))
+                    index = end
+            else:
+                certs.append(x509.load_der_x509_certificate(data))
+            _log_debug(f"Loaded {len(certs)} supplied trust anchor certificate(s)", self.log_callback)
+            return certs
+        except Exception as e:
+            _log_debug(f"Could not load supplied trust anchor from {path}: {str(e)}", self.log_callback)
+            return []
+
     def _validate_certificate_chain_basic(self, test_inputs: Dict[str, Any]) -> bool:
         """Basic certificate chain validation with AIA-based chain discovery"""
         try:
@@ -1283,15 +1353,27 @@ class PathValidationTestSuite:
             _log_debug(f"Issuer certificate issuer: {issuer_cert.issuer}", self.log_callback)
             _log_debug(f"Issuer certificate serial number: {issuer_cert.serial_number}", self.log_callback)
             
-            # Build complete certificate chain using AIA discovery
+            # Build complete certificate chain using AIA discovery,
+            # terminating at the trust anchor the user uploaded (if any).
+            supplied_anchors = self._load_supplied_trust_anchors(test_inputs)
             _log_debug("Starting AIA-based certificate chain discovery", self.log_callback)
-            complete_chain = self._build_certificate_chain_with_aia(good_cert, issuer_cert)
-            
+            complete_chain = self._build_certificate_chain_with_aia(
+                good_cert, issuer_cert, supplied_anchors=supplied_anchors
+            )
+
             if not complete_chain:
                 print("[DEBUG] Failed to build complete certificate chain")
                 return False
-            
+
             end_entity, intermediates, trust_anchors = complete_chain
+            _log_debug(
+                f"Chain discovery terminated: {self.last_chain_termination}", self.log_callback
+            )
+            if not trust_anchors:
+                _log_debug(
+                    "No trust anchor reached or supplied — chain validation will report the gap",
+                    self.log_callback,
+                )
             
             _log_debug("Complete chain built:", self.log_callback)
             _log_debug(f"- End entity: {end_entity.subject}", self.log_callback)

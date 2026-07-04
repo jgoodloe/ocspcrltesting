@@ -1,12 +1,13 @@
 import os
 import tempfile
 import uuid
-from typing import List, Optional, Any
+from typing import Any, Callable, List, Optional
 
+import requests
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from .models import TestCaseResult, TestStatus
-from .ocsp_client import send_ocsp_request, OCSPRequestSpec
+from .ocsp_client import send_ocsp_request, OCSPRequestSpec, _build_request
 from cryptography.hazmat.primitives import hashes
 from .monitor import OCSPMonitor
 from .selection import should_run
@@ -19,11 +20,33 @@ def run_security_tests(
     client_sign_cert: Optional[str],
     client_sign_key: Optional[str],
     config: Optional[Any] = None,
+    log_callback: Optional[Callable[[str], None]] = None,
 ) -> List[TestCaseResult]:
     results: List[TestCaseResult] = []
 
+    def _log(message: str) -> None:
+        if log_callback:
+            log_callback(f"[DEBUG] {message}\n")
+        else:
+            print(f"[DEBUG] {message}")
+
+    # One monitor for the whole category (its init banner is noisy and the
+    # construction is not free), created only when a test needs it.
+    _monitor_holder: List[OCSPMonitor] = []
+
+    def _get_monitor() -> OCSPMonitor:
+        if not _monitor_holder:
+            _monitor_holder.append(OCSPMonitor(log_callback=log_callback, config=config))
+        return _monitor_holder[0]
+
+    def _finish(r: TestCaseResult) -> None:
+        r.end()
+        results.append(r)
+        _log(f"Completed security test: {r.name} -> {r.status.value} - {r.message}")
+
     # 1. Malformed request (truncate DER)
     if should_run("Malformed request rejected"):
+        _log("Starting security test: Malformed request rejected")
         r = TestCaseResult(id=str(uuid.uuid4()), category="Security", name="Malformed request rejected", status=TestStatus.ERROR)
         try:
             # Test various malformed request scenarios
@@ -47,12 +70,9 @@ def run_security_tests(
             # Test with malformed DER by sending truncated request
             try:
                 # Build a normal request and truncate it
-                from .ocsp_client import _build_request
-                from .ocsp_client import OCSPRequestSpec
                 der_req, _ = _build_request(OCSPRequestSpec(good_cert or issuer, issuer, include_nonce=False))
                 truncated_req = der_req[:-10]  # Remove last 10 bytes
-            
-                import requests
+
                 headers = {"Content-Type": "application/ocsp-request", "Accept": "application/ocsp-response"}
                 resp = requests.post(ocsp_url, data=truncated_req, headers=headers, timeout=10)
                 malformed_tests.append(("Truncated DER", f"status: {resp.status_code}"))
@@ -72,15 +92,14 @@ def run_security_tests(
         except Exception as exc:
             r.status = TestStatus.ERROR
             r.message = str(exc)
-        r.end()
-        results.append(r)
+        _finish(r)
 
     # 2. Operational errors tryLater/internalError (observational)
     if should_run("Operational error signaling"):
+        _log("Starting security test: Operational error signaling")
         r = TestCaseResult(id=str(uuid.uuid4()), category="Security", name="Operational error signaling", status=TestStatus.PASS)
         try:
-            from .monitor import OCSPMonitor
-            monitor = OCSPMonitor(config=config)
+            monitor = _get_monitor()
         
             # Test operational error signaling
             issuer_path = os.path.join(tempfile.gettempdir(), f"ocsp_issuer_{uuid.uuid4().hex}.pem")
@@ -118,16 +137,15 @@ def run_security_tests(
         except Exception as e:
             r.status = TestStatus.ERROR
             r.message = f"Operational error signaling test failed: {str(e)}"
-    
-        r.end()
-        results.append(r)
+
+        _finish(r)
 
     # 3a. Unauthorized queries
     if should_run("Unauthorized query handling"):
+        _log("Starting security test: Unauthorized query handling")
         r = TestCaseResult(id=str(uuid.uuid4()), category="Security", name="Unauthorized query handling", status=TestStatus.PASS)
         try:
-            from .monitor import OCSPMonitor
-            monitor = OCSPMonitor(config=config)
+            monitor = _get_monitor()
         
             # Test unauthorized query handling
             issuer_path = os.path.join(tempfile.gettempdir(), f"ocsp_issuer_{uuid.uuid4().hex}.pem")
@@ -158,16 +176,15 @@ def run_security_tests(
         except Exception as e:
             r.status = TestStatus.ERROR
             r.message = f"Unauthorized query handling test failed: {str(e)}"
-    
-        r.end()
-        results.append(r)
+
+        _finish(r)
 
     # 3b. sigRequired without signature
     if should_run("sigRequired when unsigned"):
+        _log("Starting security test: sigRequired when unsigned")
         r = TestCaseResult(id=str(uuid.uuid4()), category="Security", name="sigRequired when unsigned", status=TestStatus.PASS)
         try:
-            from .monitor import OCSPMonitor
-            monitor = OCSPMonitor(config=config)
+            monitor = _get_monitor()
         
             # Test sigRequired validation
             issuer_path = os.path.join(tempfile.gettempdir(), f"ocsp_issuer_{uuid.uuid4().hex}.pem")
@@ -205,16 +222,15 @@ def run_security_tests(
         except Exception as e:
             r.status = TestStatus.ERROR
             r.message = f"sigRequired validation test failed: {str(e)}"
-    
-        r.end()
-        results.append(r)
+
+        _finish(r)
 
     # 4. Nonce echo verification
     if should_run("Nonce echo in response"):
+        _log("Starting security test: Nonce echo in response")
         r = TestCaseResult(id=str(uuid.uuid4()), category="Security", name="Nonce echo in response", status=TestStatus.PASS)
         try:
-            from .monitor import OCSPMonitor
-            monitor = OCSPMonitor(config=config)
+            monitor = _get_monitor()
         
             # Test nonce echo validation
             issuer_path = os.path.join(tempfile.gettempdir(), f"ocsp_issuer_{uuid.uuid4().hex}.pem")
@@ -262,12 +278,12 @@ def run_security_tests(
         except Exception as e:
             r.status = TestStatus.ERROR
             r.message = f"Nonce echo validation test failed: {str(e)}"
-    
-        r.end()
-        results.append(r)
+
+        _finish(r)
 
     # 5. Signature trust validation - partial (cannot complete full path validation generically)
     if should_run("Signature algorithm present and response SUCCESSFUL"):
+        _log("Starting security test: Signature algorithm present and response SUCCESSFUL")
         r = TestCaseResult(id=str(uuid.uuid4()), category="Security", name="Signature algorithm present and response SUCCESSFUL", status=TestStatus.ERROR)
         try:
             # Test description
@@ -383,11 +399,11 @@ def run_security_tests(
                     "parsing_issue": "OCSP response may be malformed or unsupported format"
                 }
             })
-        r.end()
-        results.append(r)
+        _finish(r)
 
     # 7. Cryptographic preference negotiation test
     if should_run("Cryptographic preference negotiation"):
+        _log("Starting security test: Cryptographic preference negotiation")
         r = TestCaseResult(id=str(uuid.uuid4()), category="Security", name="Cryptographic preference negotiation", status=TestStatus.ERROR)
     
         # Check if cryptographic preference testing is enabled
@@ -402,21 +418,18 @@ def run_security_tests(
                 "test_disabled": True,
                 "reason": "Configuration setting test_cryptographic_preferences is False"
             })
-            r.end()
-            results.append(r)
+            _finish(r)
         else:
             try:
                 # Create a temporary issuer file for the monitor
-                import tempfile
                 with tempfile.NamedTemporaryFile(mode='wb', suffix='.pem', delete=False) as f:
                     issuer_pem = issuer.public_bytes(serialization.Encoding.PEM)
                     f.write(issuer_pem)
                     issuer_path = f.name
             
                 try:
-                    # Initialize monitor with a dummy log callback
-                    monitor = OCSPMonitor(log_callback=lambda x: None, config=config)
-                
+                    monitor = _get_monitor()
+
                     # Run cryptographic preference test
                     crypto_results = monitor.run_cryptographic_preference_test(issuer_path, ocsp_url)
                 
@@ -500,8 +513,7 @@ def run_security_tests(
                         "monitor_issue": "OCSPMonitor may not be properly initialized"
                     }
                 })
-        
-            r.end()
-            results.append(r)
+
+            _finish(r)
 
     return results

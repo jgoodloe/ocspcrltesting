@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
+from .loglevels import split_level_prefix
+
 
 class _EventChannel:
     def __init__(self, fd: int):
@@ -48,7 +50,11 @@ class _PrintInterceptor(io.TextIOBase):
                 if line.strip():
                     if "PRIVATE KEY" in line:
                         line = "[REDACTED: private key material]"
-                    self._channel.emit("log", {"level": "INFO", "message": line})
+                    # Engine prints encode their level as a text prefix
+                    # ("[DEBUG] ..."); map it to the real log level so the
+                    # UI's verbose filter works.
+                    level, message = split_level_prefix(line)
+                    self._channel.emit("log", {"level": level, "message": message})
         return len(text)
 
     def flush(self) -> None:  # noqa: D102
