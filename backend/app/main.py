@@ -66,6 +66,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         retention_task.cancel()
+        # Await the cancelled task so no coroutine is left pending when the
+        # event loop closes (that hangs anyio's TestClient portal on
+        # Python <= 3.11).
+        try:
+            await retention_task
+        except asyncio.CancelledError:
+            pass
         await manager.shutdown()
         await dispose_db()
 

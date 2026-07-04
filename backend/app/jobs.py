@@ -65,6 +65,15 @@ class JobManager:
         self._tasks: Set[asyncio.Task] = set()
         self._cancel_requested: Set[str] = set()
 
+    def _track(self, task: asyncio.Task) -> asyncio.Task:
+        """Register a task so shutdown can drain it. Every task the manager
+        spawns (supervisors, stderr drainers, cancel-escalators) is tracked;
+        leaving any pending when the event loop closes hangs anyio's test
+        portal on Python <= 3.11."""
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return task
+
     # ---- lifecycle -----------------------------------------------------
 
     async def active_run_count(self) -> int:
@@ -95,9 +104,7 @@ class JobManager:
         await self._update_run(run_id, status="running", started_at=utcnow())
         await self._append_event(run_id, "run_status", await self._run_snapshot(run_id))
 
-        task = asyncio.create_task(self._supervise(run_id, process))
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        self._track(asyncio.create_task(self._supervise(run_id, process)))
         logger.info("run %s: worker pid %s started", run_id, process.pid)
 
     async def cancel_run(self, run_id: str) -> bool:
@@ -116,7 +123,7 @@ class JobManager:
             if process.returncode is None:
                 self._kill_group(process)
 
-        asyncio.create_task(_escalate())
+        self._track(asyncio.create_task(_escalate()))
         return True
 
     def _kill_group(self, process: asyncio.subprocess.Process) -> None:
@@ -129,11 +136,37 @@ class JobManager:
                 pass
 
     async def shutdown(self) -> None:
-        for run_id, process in list(self._processes.items()):
+        """Drain every worker and task while the loop still runs normally.
+
+        Killing subprocesses without reaping them, or cancelling tasks
+        without awaiting them, leaves the reaper/reader machinery pending
+        when the event loop is torn down. On Python <= 3.11 (notably under
+        the anyio blocking portal that Starlette's TestClient uses) that
+        makes loop-close ``_cancel_all_tasks`` hang forever. So we kill, reap
+        with a timeout, then cancel and gather all tracked tasks here."""
+        processes = list(self._processes.items())
+        for run_id, process in processes:
             logger.warning("shutdown: killing worker for run %s", run_id)
             self._kill_group(process)
-        for task in list(self._tasks):
+        for run_id, process in processes:
+            try:
+                await asyncio.wait_for(process.wait(), timeout=CANCEL_GRACE_SECONDS)
+            except (asyncio.TimeoutError, ProcessLookupError):
+                pass
+            except Exception:  # never let reaping abort shutdown
+                logger.exception("shutdown: error reaping worker for run %s", run_id)
+        self._processes.clear()
+
+        tasks = list(self._tasks)
+        for task in tasks:
             task.cancel()
+        if tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True), timeout=10.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning("shutdown: %d task(s) did not drain within 10s", len(tasks))
 
     async def mark_orphans_failed(self) -> None:
         """At boot, no workers exist: any queued/running rows are stale."""
@@ -149,7 +182,7 @@ class JobManager:
 
     async def _supervise(self, run_id: str, process: asyncio.subprocess.Process) -> None:
         run_timeout = await self._run_timeout(run_id)
-        stderr_task = asyncio.create_task(self._drain_stderr(run_id, process))
+        stderr_task = self._track(asyncio.create_task(self._drain_stderr(run_id, process)))
         terminal_from_worker: Optional[str] = None
         worker_error: Optional[str] = None
         latency: Optional[Dict[str, Any]] = None

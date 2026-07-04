@@ -89,6 +89,21 @@ def test_cancel_hanging_run(app_client, cert_fixtures):
     assert final["status"] == "cancelled"
 
 
+def test_teardown_with_live_worker_does_not_hang(app_client, cert_fixtures):
+    """Start a long-running worker and let the client fixture tear down while
+    it is still alive. App shutdown must kill + reap the worker and drain its
+    supervisor tasks; leaving any pending hangs the anyio TestClient portal at
+    loop close on Python <= 3.11 (the py3.10-only CI hang). pytest-timeout
+    turns a regression into a failure instead of a hung job."""
+    response = _create_run(app_client, cert_fixtures, name="hang")
+    assert response.status_code == 201
+    # Give the worker a moment to actually be running, then do nothing:
+    # the app_client fixture's TestClient.__exit__ runs the app shutdown.
+    time.sleep(0.5)
+    body = app_client.get(f"/api/test-runs/{response.json()['id']}").json()
+    assert body["status"] in ("queued", "running")
+
+
 def test_ssrf_blocked_url_rejected(app_client, cert_fixtures):
     response = _create_run(app_client, cert_fixtures, ocsp_url="http://127.0.0.1/ocsp")
     assert response.status_code == 403
