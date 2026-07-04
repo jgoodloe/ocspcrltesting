@@ -260,39 +260,66 @@ export function ConfigFields({
       <h3 className="section-label" style={{ marginTop: 16 }}>
         Test selection
       </h3>
-      <div className="field">
-        <span className="field-label">Which tests run inside the enabled categories</span>
-        <select
-          className="select"
-          style={{ maxWidth: 420 }}
-          value={config.test_selection.mode}
-          onChange={(e) =>
-            set('test_selection', {
-              ...config.test_selection,
-              mode: e.target.value as TestSelectionMode,
-            })
-          }
-          aria-label="Test selection mode"
-        >
-          <option value="all">All tests (default)</option>
-          <option value="global">Use the global test selection</option>
-          <option value="custom">Custom selection for this configuration</option>
-        </select>
-        {config.test_selection.mode === 'global' && (
-          <span className="field-hint">
-            The server-wide selection from <Link to="/settings">Settings</Link> is applied when the
-            run starts.
-          </span>
-        )}
-      </div>
+      <fieldset className="tsel-mode-group">
+        <legend className="visually-hidden">
+          Which tests run inside the enabled categories
+        </legend>
+        {(
+          [
+            {
+              mode: 'all',
+              name: 'All tests',
+              desc: 'Run every test in each enabled category (default)',
+            },
+            {
+              mode: 'global',
+              name: 'Global selection',
+              desc: 'Apply the server-wide selection from Settings when the run starts',
+            },
+            {
+              mode: 'custom',
+              name: 'Custom',
+              desc: 'Pick individual tests for this configuration',
+            },
+          ] as Array<{ mode: TestSelectionMode; name: string; desc: string }>
+        ).map((opt) => {
+          const on = config.test_selection.mode === opt.mode;
+          return (
+            <label key={opt.mode} className={`category-toggle${on ? ' on' : ''}`}>
+              <input
+                type="radio"
+                name="test-selection-mode"
+                value={opt.mode}
+                checked={on}
+                onChange={() =>
+                  set('test_selection', { ...config.test_selection, mode: opt.mode })
+                }
+              />
+              <span>
+                <span className="ct-name">{opt.name}</span>
+                <br />
+                <span className="ct-desc">{opt.desc}</span>
+              </span>
+            </label>
+          );
+        })}
+      </fieldset>
+      {config.test_selection.mode === 'global' && (
+        <p className="field-hint" style={{ margin: '8px 2px 0' }}>
+          The server-wide selection is managed on the <Link to="/settings">Settings</Link> page
+          and resolved when the run starts.
+        </p>
+      )}
       {config.test_selection.mode === 'custom' && (
-        <TestSelectionEditor
-          value={config.test_selection.tests}
-          enabledCategories={config.categories}
-          onChange={(tests) =>
-            set('test_selection', { ...config.test_selection, tests })
-          }
-        />
+        <div style={{ marginTop: 10 }}>
+          <TestSelectionEditor
+            value={config.test_selection.tests}
+            enabledCategories={config.categories}
+            onChange={(tests) =>
+              set('test_selection', { ...config.test_selection, tests })
+            }
+          />
+        </div>
       )}
     </>
   );
