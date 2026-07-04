@@ -1,6 +1,8 @@
 import type { ChangeEvent } from 'react';
-import type { RunConfig } from '../lib/api';
+import { Link } from 'react-router-dom';
+import type { RunConfig, TestSelectionMode } from '../lib/api';
 import { CategoryToggles } from './CategoryToggles';
+import { TestSelectionEditor } from './TestSelectionEditor';
 
 /**
  * All RunConfig option fields (everything except file uploads and the run
@@ -254,6 +256,44 @@ export function ConfigFields({
         value={config.categories}
         onChange={(categories) => set('categories', categories)}
       />
+
+      <h3 className="section-label" style={{ marginTop: 16 }}>
+        Test selection
+      </h3>
+      <div className="field">
+        <span className="field-label">Which tests run inside the enabled categories</span>
+        <select
+          className="select"
+          style={{ maxWidth: 420 }}
+          value={config.test_selection.mode}
+          onChange={(e) =>
+            set('test_selection', {
+              ...config.test_selection,
+              mode: e.target.value as TestSelectionMode,
+            })
+          }
+          aria-label="Test selection mode"
+        >
+          <option value="all">All tests (default)</option>
+          <option value="global">Use the global test selection</option>
+          <option value="custom">Custom selection for this configuration</option>
+        </select>
+        {config.test_selection.mode === 'global' && (
+          <span className="field-hint">
+            The server-wide selection from <Link to="/settings">Settings</Link> is applied when the
+            run starts.
+          </span>
+        )}
+      </div>
+      {config.test_selection.mode === 'custom' && (
+        <TestSelectionEditor
+          value={config.test_selection.tests}
+          enabledCategories={config.categories}
+          onChange={(tests) =>
+            set('test_selection', { ...config.test_selection, tests })
+          }
+        />
+      )}
     </>
   );
 }

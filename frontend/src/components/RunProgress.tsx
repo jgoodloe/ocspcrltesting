@@ -27,13 +27,14 @@ export function RunProgress({
       <div
         className="progress-outer"
         role="progressbar"
+        aria-label="Run progress"
         aria-valuenow={Math.round(percent)}
         aria-valuemin={0}
         aria-valuemax={100}
       >
         <div className={barClass} style={{ width: `${percent}%` }} />
       </div>
-      <div className="current-activity">
+      <div className="current-activity" aria-live="polite">
         {activity ? (
           <>
             <span>{activity}</span>

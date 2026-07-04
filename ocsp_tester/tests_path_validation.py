@@ -32,6 +32,7 @@ from cryptography.x509.oid import NameOID, ExtensionOID, CertificatePoliciesOID
 from .models import TestCaseResult, TestStatus
 from .ocsp_client import send_ocsp_request, OCSPRequestSpec
 from .path_validator import CertificatePathValidator, ValidationResult
+from .selection import should_run
 
 
 @dataclass
@@ -124,290 +125,294 @@ class PathValidationTestSuite:
         test_id = "1.01"
         test_name = "Valid Path (Success): End-entity -> Intermediate CA -> Trusted Root"
         
-        try:
-            # This would typically use provided test certificates
-            # For now, we'll create a basic validation framework
-            result = self._validate_certificate_chain_basic(test_inputs)
+        if should_run(test_name):
+            try:
+                # This would typically use provided test certificates
+                # For now, we'll create a basic validation framework
+                result = self._validate_certificate_chain_basic(test_inputs)
             
-            if result:
+                if result:
+                    self.test_results.append(TestCaseResult(
+                        id=f"path_validation_{test_id}",
+                        category="Path Validation - Foundational",
+                        name=test_name,
+                        status=TestStatus.PASS,
+                        message="Valid certificate chain passed validation",
+                        details={
+                            "test_id": test_id,
+                            "rfc_reference": "RFC 5280 Section 6",
+                            "validation_result": "PASS",
+                            "description": "Tests basic certificate chain validation with valid certificates",
+                            "validation_steps": [
+                                "Certificate signature verification",
+                                "Certificate validity period checks",
+                                "Basic constraints validation",
+                                "Key usage validation",
+                                "Path length constraint checks"
+                            ],
+                            "expected_result": "PASS",
+                            "actual_result": "PASS",
+                            "test_category": "Foundational Path Construction",
+                            "severity": "Critical",
+                            "failure_impact": "Complete validation failure if this test fails",
+                            "certificate_details": getattr(self, 'certificate_details', {})
+                        }
+                    ))
+                else:
+                    self.test_results.append(TestCaseResult(
+                        id=f"path_validation_{test_id}",
+                        category="Path Validation - Foundational",
+                        name=test_name,
+                        status=TestStatus.FAIL,
+                        message="Valid certificate chain failed validation",
+                        details={
+                            "test_id": test_id,
+                            "rfc_reference": "RFC 5280 Section 6",
+                            "validation_result": "FAIL",
+                            "description": "Tests basic certificate chain validation with valid certificates",
+                            "validation_steps": [
+                                "Certificate signature verification",
+                                "Certificate validity period checks",
+                                "Basic constraints validation",
+                                "Key usage validation",
+                                "Path length constraint checks"
+                            ],
+                            "expected_result": "PASS",
+                            "actual_result": "FAIL",
+                            "test_category": "Foundational Path Construction",
+                            "severity": "Critical",
+                            "failure_impact": "Complete validation failure - indicates fundamental issues with certificate chain",
+                            "error_details": self._get_validation_error_details(test_inputs),
+                            "troubleshooting": [
+                                "Check certificate file paths are correct",
+                                "Verify certificates are in valid PEM/DER format",
+                                "Ensure certificates are not corrupted",
+                                "Check system time is accurate",
+                                "Verify issuer and subject DNs match correctly",
+                                "Check signature algorithm compatibility",
+                                "Ensure certificates are from the same PKI",
+                                "Check for certificate chain completeness"
+                            ]
+                        }
+                    ))
+                
+            except Exception as e:
                 self.test_results.append(TestCaseResult(
                     id=f"path_validation_{test_id}",
                     category="Path Validation - Foundational",
                     name=test_name,
-                    status=TestStatus.PASS,
-                    message="Valid certificate chain passed validation",
+                    status=TestStatus.ERROR,
+                    message=f"Test execution failed: {str(e)}",
                     details={
                         "test_id": test_id,
+                        "error": str(e),
                         "rfc_reference": "RFC 5280 Section 6",
-                        "validation_result": "PASS",
                         "description": "Tests basic certificate chain validation with valid certificates",
-                        "validation_steps": [
-                            "Certificate signature verification",
-                            "Certificate validity period checks",
-                            "Basic constraints validation",
-                            "Key usage validation",
-                            "Path length constraint checks"
-                        ],
-                        "expected_result": "PASS",
-                        "actual_result": "PASS",
                         "test_category": "Foundational Path Construction",
                         "severity": "Critical",
-                        "failure_impact": "Complete validation failure if this test fails",
-                        "certificate_details": getattr(self, 'certificate_details', {})
-                    }
-                ))
-            else:
-                self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
-                    category="Path Validation - Foundational",
-                    name=test_name,
-                    status=TestStatus.FAIL,
-                    message="Valid certificate chain failed validation",
-                    details={
-                        "test_id": test_id,
-                        "rfc_reference": "RFC 5280 Section 6",
-                        "validation_result": "FAIL",
-                        "description": "Tests basic certificate chain validation with valid certificates",
-                        "validation_steps": [
-                            "Certificate signature verification",
-                            "Certificate validity period checks",
-                            "Basic constraints validation",
-                            "Key usage validation",
-                            "Path length constraint checks"
-                        ],
-                        "expected_result": "PASS",
-                        "actual_result": "FAIL",
-                        "test_category": "Foundational Path Construction",
-                        "severity": "Critical",
-                        "failure_impact": "Complete validation failure - indicates fundamental issues with certificate chain",
-                        "error_details": self._get_validation_error_details(test_inputs),
+                        "failure_impact": "Test execution failure - indicates system or configuration issues",
                         "troubleshooting": [
-                            "Check certificate file paths are correct",
-                            "Verify certificates are in valid PEM/DER format",
-                            "Ensure certificates are not corrupted",
-                            "Check system time is accurate",
-                            "Verify issuer and subject DNs match correctly",
-                            "Check signature algorithm compatibility",
-                            "Ensure certificates are from the same PKI",
-                            "Check for certificate chain completeness"
+                            "Check Python cryptography library installation",
+                            "Verify certificate file permissions",
+                            "Check system resources and memory",
+                            "Review error logs for detailed information"
                         ]
                     }
                 ))
-                
-        except Exception as e:
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Foundational",
-                name=test_name,
-                status=TestStatus.ERROR,
-                message=f"Test execution failed: {str(e)}",
-                details={
-                    "test_id": test_id,
-                    "error": str(e),
-                    "rfc_reference": "RFC 5280 Section 6",
-                    "description": "Tests basic certificate chain validation with valid certificates",
-                    "test_category": "Foundational Path Construction",
-                    "severity": "Critical",
-                    "failure_impact": "Test execution failure - indicates system or configuration issues",
-                    "troubleshooting": [
-                        "Check Python cryptography library installation",
-                        "Verify certificate file permissions",
-                        "Check system resources and memory",
-                        "Review error logs for detailed information"
-                    ]
-                }
-            ))
         
         # Test 1.02: Invalid Signature (EE)
         test_id = "1.02"
         test_name = "Invalid Signature (EE): EE certificate's signature cannot be verified"
         
-        try:
-            result = self._test_invalid_signature_ee(test_inputs)
-            status = TestStatus.FAIL if result else TestStatus.PASS
+        if should_run(test_name):
+            try:
+                result = self._test_invalid_signature_ee(test_inputs)
+                status = TestStatus.FAIL if result else TestStatus.PASS
             
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Foundational",
-                name=test_name,
-                status=status,
-                message=f"Invalid EE signature test {'failed as expected' if result else 'incorrectly passed'}",
-                details={
-                    "test_id": test_id,
-                    "rfc_reference": "Core Signature Check",
-                    "expected_result": "FAIL",
-                    "actual_result": "FAIL" if result else "PASS",
-                    "description": "Tests detection of invalid end-entity certificate signatures",
-                    "validation_steps": [
-                        "Load end-entity certificate",
-                        "Load issuer certificate",
-                        "Extract issuer's public key",
-                        "Verify signature using issuer's public key",
-                        "Check for signature verification failure"
-                    ],
-                    "test_category": "Foundational Path Construction",
-                    "severity": "Critical",
-                    "failure_impact": "Security vulnerability - invalid signatures should be rejected",
-                    "cryptographic_details": {
-                        "signature_algorithm": "RSA-SHA256",
-                        "key_size": "2048 bits",
-                        "hash_algorithm": "SHA-256"
-                    },
-                    "troubleshooting": [
-                        "Verify certificate and issuer certificate are correctly paired",
-                        "Check if certificates are corrupted or tampered with",
-                        "Ensure proper cryptographic library installation",
-                        "Verify system time accuracy for signature validation"
-                    ]
-                }
-            ))
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Foundational",
+                    name=test_name,
+                    status=status,
+                    message=f"Invalid EE signature test {'failed as expected' if result else 'incorrectly passed'}",
+                    details={
+                        "test_id": test_id,
+                        "rfc_reference": "Core Signature Check",
+                        "expected_result": "FAIL",
+                        "actual_result": "FAIL" if result else "PASS",
+                        "description": "Tests detection of invalid end-entity certificate signatures",
+                        "validation_steps": [
+                            "Load end-entity certificate",
+                            "Load issuer certificate",
+                            "Extract issuer's public key",
+                            "Verify signature using issuer's public key",
+                            "Check for signature verification failure"
+                        ],
+                        "test_category": "Foundational Path Construction",
+                        "severity": "Critical",
+                        "failure_impact": "Security vulnerability - invalid signatures should be rejected",
+                        "cryptographic_details": {
+                            "signature_algorithm": "RSA-SHA256",
+                            "key_size": "2048 bits",
+                            "hash_algorithm": "SHA-256"
+                        },
+                        "troubleshooting": [
+                            "Verify certificate and issuer certificate are correctly paired",
+                            "Check if certificates are corrupted or tampered with",
+                            "Ensure proper cryptographic library installation",
+                            "Verify system time accuracy for signature validation"
+                        ]
+                    }
+                ))
             
-        except Exception as e:
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Foundational",
-                name=test_name,
-                status=TestStatus.ERROR,
-                message=f"Test execution failed: {str(e)}",
-                details={
-                    "test_id": test_id,
-                    "error": str(e),
-                    "description": "Tests detection of invalid end-entity certificate signatures",
-                    "test_category": "Foundational Path Construction",
-                    "severity": "Critical",
-                    "failure_impact": "Test execution failure - cannot verify signature validation",
-                    "troubleshooting": [
-                        "Check Python cryptography library installation",
-                        "Verify certificate file permissions",
-                        "Check system resources and memory",
-                        "Review error logs for detailed information"
-                    ]
-                }
-            ))
+            except Exception as e:
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Foundational",
+                    name=test_name,
+                    status=TestStatus.ERROR,
+                    message=f"Test execution failed: {str(e)}",
+                    details={
+                        "test_id": test_id,
+                        "error": str(e),
+                        "description": "Tests detection of invalid end-entity certificate signatures",
+                        "test_category": "Foundational Path Construction",
+                        "severity": "Critical",
+                        "failure_impact": "Test execution failure - cannot verify signature validation",
+                        "troubleshooting": [
+                            "Check Python cryptography library installation",
+                            "Verify certificate file permissions",
+                            "Check system resources and memory",
+                            "Review error logs for detailed information"
+                        ]
+                    }
+                ))
         
         # Test 1.03: Invalid Signature (Intermediate)
         test_id = "1.03"
         test_name = "Invalid Signature (Intermediate): Intermediate CA certificate's signature is invalid"
         
-        try:
-            result = self._test_invalid_signature_intermediate(test_inputs)
-            status = TestStatus.FAIL if result else TestStatus.PASS
+        if should_run(test_name):
+            try:
+                result = self._test_invalid_signature_intermediate(test_inputs)
+                status = TestStatus.FAIL if result else TestStatus.PASS
             
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Foundational",
-                name=test_name,
-                status=status,
-                message=f"Invalid intermediate signature test {'failed as expected' if result else 'incorrectly passed'}",
-                details={
-                    "test_id": test_id,
-                    "rfc_reference": "Core Signature Check (Mismatched Key)",
-                    "expected_result": "FAIL",
-                    "actual_result": "FAIL" if result else "PASS",
-                    "description": "Tests detection of invalid intermediate CA certificate signatures",
-                    "validation_steps": [
-                        "Load intermediate CA certificate",
-                        "Load parent CA certificate",
-                        "Extract parent CA's public key",
-                        "Verify signature using parent CA's public key",
-                        "Check for signature verification failure"
-                    ],
-                    "test_category": "Foundational Path Construction",
-                    "severity": "Critical",
-                    "failure_impact": "Security vulnerability - invalid intermediate signatures should be rejected",
-                    "troubleshooting": [
-                        "Verify intermediate and parent certificates are correctly paired",
-                        "Check if certificates are corrupted or tampered with",
-                        "Ensure proper cryptographic library installation",
-                        "Verify certificate chain completeness"
-                    ]
-                }
-            ))
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Foundational",
+                    name=test_name,
+                    status=status,
+                    message=f"Invalid intermediate signature test {'failed as expected' if result else 'incorrectly passed'}",
+                    details={
+                        "test_id": test_id,
+                        "rfc_reference": "Core Signature Check (Mismatched Key)",
+                        "expected_result": "FAIL",
+                        "actual_result": "FAIL" if result else "PASS",
+                        "description": "Tests detection of invalid intermediate CA certificate signatures",
+                        "validation_steps": [
+                            "Load intermediate CA certificate",
+                            "Load parent CA certificate",
+                            "Extract parent CA's public key",
+                            "Verify signature using parent CA's public key",
+                            "Check for signature verification failure"
+                        ],
+                        "test_category": "Foundational Path Construction",
+                        "severity": "Critical",
+                        "failure_impact": "Security vulnerability - invalid intermediate signatures should be rejected",
+                        "troubleshooting": [
+                            "Verify intermediate and parent certificates are correctly paired",
+                            "Check if certificates are corrupted or tampered with",
+                            "Ensure proper cryptographic library installation",
+                            "Verify certificate chain completeness"
+                        ]
+                    }
+                ))
             
-        except Exception as e:
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Foundational",
-                name=test_name,
-                status=TestStatus.ERROR,
-                message=f"Test execution failed: {str(e)}",
-                details={
-                    "test_id": test_id,
-                    "error": str(e),
-                    "description": "Tests detection of invalid intermediate CA certificate signatures",
-                    "test_category": "Foundational Path Construction",
-                    "severity": "Critical",
-                    "failure_impact": "Test execution failure - cannot verify intermediate signature validation",
-                    "troubleshooting": [
-                        "Check Python cryptography library installation",
-                        "Verify certificate file permissions",
-                        "Check system resources and memory",
-                        "Review error logs for detailed information"
-                    ]
-                }
-            ))
+            except Exception as e:
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Foundational",
+                    name=test_name,
+                    status=TestStatus.ERROR,
+                    message=f"Test execution failed: {str(e)}",
+                    details={
+                        "test_id": test_id,
+                        "error": str(e),
+                        "description": "Tests detection of invalid intermediate CA certificate signatures",
+                        "test_category": "Foundational Path Construction",
+                        "severity": "Critical",
+                        "failure_impact": "Test execution failure - cannot verify intermediate signature validation",
+                        "troubleshooting": [
+                            "Check Python cryptography library installation",
+                            "Verify certificate file permissions",
+                            "Check system resources and memory",
+                            "Review error logs for detailed information"
+                        ]
+                    }
+                ))
         
         # Test 1.04: Issuer/Subject Mismatch
         test_id = "1.04"
         test_name = "Issuer/Subject Mismatch: The Issuer DN of the child cert does not match the Subject DN of the parent cert"
         
-        try:
-            result = self._test_issuer_subject_mismatch(test_inputs)
-            status = TestStatus.FAIL if result else TestStatus.PASS
+        if should_run(test_name):
+            try:
+                result = self._test_issuer_subject_mismatch(test_inputs)
+                status = TestStatus.FAIL if result else TestStatus.PASS
             
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Foundational",
-                name=test_name,
-                status=status,
-                message=f"Issuer/Subject mismatch test {'failed as expected' if result else 'incorrectly passed'}",
-                details={
-                    "test_id": test_id,
-                    "rfc_reference": "Name Chaining Failure",
-                    "expected_result": "FAIL",
-                    "actual_result": "FAIL" if result else "PASS",
-                    "description": "Tests detection of issuer/subject DN mismatches in certificate chains",
-                    "validation_steps": [
-                        "Load child certificate",
-                        "Load parent certificate",
-                        "Compare child certificate's issuer DN with parent certificate's subject DN",
-                        "Check for DN mismatch",
-                        "Verify proper certificate chain relationship"
-                    ],
-                    "test_category": "Foundational Path Construction",
-                    "severity": "Critical",
-                    "failure_impact": "Certificate chain integrity failure - mismatched DNs indicate broken chain",
-                    "troubleshooting": [
-                        "Verify certificates belong to the same PKI",
-                        "Check certificate file paths are correct",
-                        "Ensure certificates are not mixed from different CAs",
-                        "Verify certificate chain completeness"
-                    ]
-                }
-            ))
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Foundational",
+                    name=test_name,
+                    status=status,
+                    message=f"Issuer/Subject mismatch test {'failed as expected' if result else 'incorrectly passed'}",
+                    details={
+                        "test_id": test_id,
+                        "rfc_reference": "Name Chaining Failure",
+                        "expected_result": "FAIL",
+                        "actual_result": "FAIL" if result else "PASS",
+                        "description": "Tests detection of issuer/subject DN mismatches in certificate chains",
+                        "validation_steps": [
+                            "Load child certificate",
+                            "Load parent certificate",
+                            "Compare child certificate's issuer DN with parent certificate's subject DN",
+                            "Check for DN mismatch",
+                            "Verify proper certificate chain relationship"
+                        ],
+                        "test_category": "Foundational Path Construction",
+                        "severity": "Critical",
+                        "failure_impact": "Certificate chain integrity failure - mismatched DNs indicate broken chain",
+                        "troubleshooting": [
+                            "Verify certificates belong to the same PKI",
+                            "Check certificate file paths are correct",
+                            "Ensure certificates are not mixed from different CAs",
+                            "Verify certificate chain completeness"
+                        ]
+                    }
+                ))
             
-        except Exception as e:
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Foundational",
-                name=test_name,
-                status=TestStatus.ERROR,
-                message=f"Test execution failed: {str(e)}",
-                details={
-                    "test_id": test_id,
-                    "error": str(e),
-                    "description": "Tests detection of issuer/subject DN mismatches in certificate chains",
-                    "test_category": "Foundational Path Construction",
-                    "severity": "Critical",
-                    "failure_impact": "Test execution failure - cannot verify DN matching",
-                    "troubleshooting": [
-                        "Check Python cryptography library installation",
-                        "Verify certificate file permissions",
-                        "Check system resources and memory",
-                        "Review error logs for detailed information"
-                    ]
-                }
-            ))
+            except Exception as e:
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Foundational",
+                    name=test_name,
+                    status=TestStatus.ERROR,
+                    message=f"Test execution failed: {str(e)}",
+                    details={
+                        "test_id": test_id,
+                        "error": str(e),
+                        "description": "Tests detection of issuer/subject DN mismatches in certificate chains",
+                        "test_category": "Foundational Path Construction",
+                        "severity": "Critical",
+                        "failure_impact": "Test execution failure - cannot verify DN matching",
+                        "troubleshooting": [
+                            "Check Python cryptography library installation",
+                            "Verify certificate file permissions",
+                            "Check system resources and memory",
+                            "Review error logs for detailed information"
+                        ]
+                    }
+                ))
     
     def run_validity_period_tests(self, test_inputs: Dict[str, Any]) -> None:
         """Test Category 2: Certificate Validity Period (Time) Tests"""
@@ -416,97 +421,99 @@ class PathValidationTestSuite:
         test_id = "2.01"
         test_name = "notAfter Expired (EE): Validation time after EE certificate's notAfter"
         
-        try:
-            result = self._test_expired_ee_certificate(test_inputs)
+        if should_run(test_name):
+            try:
+                result = self._test_expired_ee_certificate(test_inputs)
             
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Validity Period",
-                name=test_name,
-                status=TestStatus.FAIL if result else TestStatus.PASS,
-                message=f"Expired EE certificate test {'correctly failed' if result else 'incorrectly passed'}",
-                details={
-                    "test_id": test_id,
-                    "rfc_reference": "EE Certificate Expired",
-                    "expected_result": "FAIL",
-                    "actual_result": "FAIL" if result else "PASS",
-                    "description": "Tests detection of expired end-entity certificates",
-                    "validation_steps": [
-                        "Load end-entity certificate",
-                        "Extract notAfter field from certificate",
-                        "Compare notAfter with current validation time",
-                        "Verify expiration detection logic"
-                    ],
-                    "test_category": "Certificate Validity Period",
-                    "severity": "High",
-                    "failure_impact": "Security risk - expired certificates should be rejected",
-                    "time_validation_details": {
-                        "validation_time": datetime.utcnow().isoformat(),
-                        "certificate_not_after": "Extracted from certificate",
-                        "time_comparison": "Validation time > notAfter"
-                    },
-                    "troubleshooting": [
-                        "Check system time accuracy",
-                        "Verify certificate notAfter field is properly formatted",
-                        "Ensure timezone handling is correct (UTC)",
-                        "Check for clock skew issues"
-                    ]
-                }
-            ))
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Validity Period",
+                    name=test_name,
+                    status=TestStatus.FAIL if result else TestStatus.PASS,
+                    message=f"Expired EE certificate test {'correctly failed' if result else 'incorrectly passed'}",
+                    details={
+                        "test_id": test_id,
+                        "rfc_reference": "EE Certificate Expired",
+                        "expected_result": "FAIL",
+                        "actual_result": "FAIL" if result else "PASS",
+                        "description": "Tests detection of expired end-entity certificates",
+                        "validation_steps": [
+                            "Load end-entity certificate",
+                            "Extract notAfter field from certificate",
+                            "Compare notAfter with current validation time",
+                            "Verify expiration detection logic"
+                        ],
+                        "test_category": "Certificate Validity Period",
+                        "severity": "High",
+                        "failure_impact": "Security risk - expired certificates should be rejected",
+                        "time_validation_details": {
+                            "validation_time": datetime.utcnow().isoformat(),
+                            "certificate_not_after": "Extracted from certificate",
+                            "time_comparison": "Validation time > notAfter"
+                        },
+                        "troubleshooting": [
+                            "Check system time accuracy",
+                            "Verify certificate notAfter field is properly formatted",
+                            "Ensure timezone handling is correct (UTC)",
+                            "Check for clock skew issues"
+                        ]
+                    }
+                ))
             
-        except Exception as e:
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Validity Period",
-                name=test_name,
-                status=TestStatus.ERROR,
-                message=f"Test execution failed: {str(e)}",
-                details={
-                    "test_id": test_id,
-                    "error": str(e),
-                    "description": "Tests detection of expired end-entity certificates",
-                    "test_category": "Certificate Validity Period",
-                    "severity": "High",
-                    "failure_impact": "Test execution failure - cannot verify certificate expiration",
-                    "troubleshooting": [
-                        "Check Python cryptography library installation",
-                        "Verify certificate file permissions",
-                        "Check system resources and memory",
-                        "Review error logs for detailed information"
-                    ]
-                }
-            ))
+            except Exception as e:
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Validity Period",
+                    name=test_name,
+                    status=TestStatus.ERROR,
+                    message=f"Test execution failed: {str(e)}",
+                    details={
+                        "test_id": test_id,
+                        "error": str(e),
+                        "description": "Tests detection of expired end-entity certificates",
+                        "test_category": "Certificate Validity Period",
+                        "severity": "High",
+                        "failure_impact": "Test execution failure - cannot verify certificate expiration",
+                        "troubleshooting": [
+                            "Check Python cryptography library installation",
+                            "Verify certificate file permissions",
+                            "Check system resources and memory",
+                            "Review error logs for detailed information"
+                        ]
+                    }
+                ))
         
         # Test 2.04: Revocation Status Expired
         test_id = "2.04"
         test_name = "Revocation Status Expired: CRL has expired (nextUpdate in past)"
         
-        try:
-            result = self._test_expired_crl(test_inputs)
+        if should_run(test_name):
+            try:
+                result = self._test_expired_crl(test_inputs)
             
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Validity Period",
-                name=test_name,
-                status=TestStatus.FAIL if result else TestStatus.PASS,
-                message=f"Expired CRL test {'correctly failed' if result else 'incorrectly passed'}",
-                details={
-                    "test_id": test_id,
-                    "rfc_reference": "Must retrieve fresh revocation data",
-                    "expected_result": "FAIL",
-                    "actual_result": "FAIL" if result else "PASS"
-                }
-            ))
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Validity Period",
+                    name=test_name,
+                    status=TestStatus.FAIL if result else TestStatus.PASS,
+                    message=f"Expired CRL test {'correctly failed' if result else 'incorrectly passed'}",
+                    details={
+                        "test_id": test_id,
+                        "rfc_reference": "Must retrieve fresh revocation data",
+                        "expected_result": "FAIL",
+                        "actual_result": "FAIL" if result else "PASS"
+                    }
+                ))
             
-        except Exception as e:
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Validity Period",
-                name=test_name,
-                status=TestStatus.ERROR,
-                message=f"Test execution failed: {str(e)}",
-                details={"test_id": test_id, "error": str(e)}
-            ))
+            except Exception as e:
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Validity Period",
+                    name=test_name,
+                    status=TestStatus.ERROR,
+                    message=f"Test execution failed: {str(e)}",
+                    details={"test_id": test_id, "error": str(e)}
+                ))
     
     def run_revocation_status_tests(self, test_inputs: Dict[str, Any]) -> None:
         """Test Category 3: Revocation Status Tests"""
@@ -515,103 +522,105 @@ class PathValidationTestSuite:
         test_id = "3.01"
         test_name = "Revoked (EE) in Fresh CRL: EE serial number on most recent CRL"
         
-        try:
-            result = self._test_revoked_ee_crl(test_inputs)
+        if should_run(test_name):
+            try:
+                result = self._test_revoked_ee_crl(test_inputs)
             
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Revocation Status",
-                name=test_name,
-                status=TestStatus.FAIL if result else TestStatus.PASS,
-                message=f"Revoked EE in CRL test {'correctly failed' if result else 'incorrectly passed'}",
-                details={
-                    "test_id": test_id,
-                    "rfc_reference": "CRL Revoked Status",
-                    "expected_result": "FAIL",
-                    "actual_result": "FAIL" if result else "PASS"
-                }
-            ))
-            
-        except Exception as e:
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Revocation Status",
-                name=test_name,
-                status=TestStatus.ERROR,
-                message=f"Test execution failed: {str(e)}",
-                details={
-                    "test_id": test_id,
-                    "error": str(e),
-                    "rfc_reference": "CRL Revoked Status",
-                    "description": "Tests detection of revoked certificates in Certificate Revocation Lists",
-                    "test_category": "Revocation Status",
-                    "severity": "High",
-                    "failure_impact": "Test execution failure - cannot verify revocation status",
-                    "troubleshooting": [
-                        "Check Python cryptography library installation",
-                        "Verify certificate file permissions",
-                        "Check CRL file availability and format",
-                        "Validate CRL signature and issuer",
-                        "Review system resources and memory"
-                    ],
-                    "revocation_info": {
-                        "purpose": "CRL validation ensures certificates are not revoked",
-                        "validation_requirements": "Must properly parse CRL and check certificate serial numbers",
-                        "security_impact": "Critical for maintaining certificate trust"
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Revocation Status",
+                    name=test_name,
+                    status=TestStatus.FAIL if result else TestStatus.PASS,
+                    message=f"Revoked EE in CRL test {'correctly failed' if result else 'incorrectly passed'}",
+                    details={
+                        "test_id": test_id,
+                        "rfc_reference": "CRL Revoked Status",
+                        "expected_result": "FAIL",
+                        "actual_result": "FAIL" if result else "PASS"
                     }
-                }
-            ))
+                ))
+            
+            except Exception as e:
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Revocation Status",
+                    name=test_name,
+                    status=TestStatus.ERROR,
+                    message=f"Test execution failed: {str(e)}",
+                    details={
+                        "test_id": test_id,
+                        "error": str(e),
+                        "rfc_reference": "CRL Revoked Status",
+                        "description": "Tests detection of revoked certificates in Certificate Revocation Lists",
+                        "test_category": "Revocation Status",
+                        "severity": "High",
+                        "failure_impact": "Test execution failure - cannot verify revocation status",
+                        "troubleshooting": [
+                            "Check Python cryptography library installation",
+                            "Verify certificate file permissions",
+                            "Check CRL file availability and format",
+                            "Validate CRL signature and issuer",
+                            "Review system resources and memory"
+                        ],
+                        "revocation_info": {
+                            "purpose": "CRL validation ensures certificates are not revoked",
+                            "validation_requirements": "Must properly parse CRL and check certificate serial numbers",
+                            "security_impact": "Critical for maintaining certificate trust"
+                        }
+                    }
+                ))
         
         # Test 3.03: Revoked (EE) by OCSP
         test_id = "3.03"
         test_name = "Revoked (EE) by OCSP: OCSP response is revoked status"
         
-        try:
-            result = self._test_revoked_ee_ocsp(test_inputs)
+        if should_run(test_name):
+            try:
+                result = self._test_revoked_ee_ocsp(test_inputs)
             
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Revocation Status",
-                name=test_name,
-                status=TestStatus.FAIL if result else TestStatus.PASS,
-                message=f"Revoked EE by OCSP test {'correctly failed' if result else 'incorrectly passed'}",
-                details={
-                    "test_id": test_id,
-                    "rfc_reference": "OCSP Revoked Status",
-                    "expected_result": "FAIL",
-                    "actual_result": "FAIL" if result else "PASS"
-                }
-            ))
-            
-        except Exception as e:
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Revocation Status",
-                name=test_name,
-                status=TestStatus.ERROR,
-                message=f"Test execution failed: {str(e)}",
-                details={
-                    "test_id": test_id,
-                    "error": str(e),
-                    "rfc_reference": "OCSP Revoked Status",
-                    "description": "Tests detection of revoked certificates via OCSP responses",
-                    "test_category": "Revocation Status",
-                    "severity": "High",
-                    "failure_impact": "Test execution failure - cannot verify OCSP revocation status",
-                    "troubleshooting": [
-                        "Check Python cryptography library installation",
-                        "Verify certificate file permissions",
-                        "Check OCSP URL connectivity and availability",
-                        "Validate OCSP response format and signature",
-                        "Review system resources and memory"
-                    ],
-                    "ocsp_revocation_info": {
-                        "purpose": "OCSP validation provides real-time certificate revocation status",
-                        "validation_requirements": "Must properly parse OCSP responses and validate signatures",
-                        "security_impact": "Critical for maintaining certificate trust with real-time revocation"
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Revocation Status",
+                    name=test_name,
+                    status=TestStatus.FAIL if result else TestStatus.PASS,
+                    message=f"Revoked EE by OCSP test {'correctly failed' if result else 'incorrectly passed'}",
+                    details={
+                        "test_id": test_id,
+                        "rfc_reference": "OCSP Revoked Status",
+                        "expected_result": "FAIL",
+                        "actual_result": "FAIL" if result else "PASS"
                     }
-                }
-            ))
+                ))
+            
+            except Exception as e:
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Revocation Status",
+                    name=test_name,
+                    status=TestStatus.ERROR,
+                    message=f"Test execution failed: {str(e)}",
+                    details={
+                        "test_id": test_id,
+                        "error": str(e),
+                        "rfc_reference": "OCSP Revoked Status",
+                        "description": "Tests detection of revoked certificates via OCSP responses",
+                        "test_category": "Revocation Status",
+                        "severity": "High",
+                        "failure_impact": "Test execution failure - cannot verify OCSP revocation status",
+                        "troubleshooting": [
+                            "Check Python cryptography library installation",
+                            "Verify certificate file permissions",
+                            "Check OCSP URL connectivity and availability",
+                            "Validate OCSP response format and signature",
+                            "Review system resources and memory"
+                        ],
+                        "ocsp_revocation_info": {
+                            "purpose": "OCSP validation provides real-time certificate revocation status",
+                            "validation_requirements": "Must properly parse OCSP responses and validate signatures",
+                            "security_impact": "Critical for maintaining certificate trust with real-time revocation"
+                        }
+                    }
+                ))
     
     def run_constraint_extension_tests(self, test_inputs: Dict[str, Any]) -> None:
         """Test Category 4: Constraint and Extension Tests"""
@@ -620,87 +629,89 @@ class PathValidationTestSuite:
         test_id = "4.01"
         test_name = "Basic Constraints Violation: Intermediate CA cert has cA = false"
         
-        try:
-            result = self._test_basic_constraints_violation(test_inputs)
+        if should_run(test_name):
+            try:
+                result = self._test_basic_constraints_violation(test_inputs)
             
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Constraints & Extensions",
-                name=test_name,
-                status=TestStatus.FAIL if result else TestStatus.PASS,
-                message=f"Basic constraints violation test {'correctly failed' if result else 'incorrectly passed'}",
-                details={
-                    "test_id": test_id,
-                    "rfc_reference": "CA flag must be true for a CA cert",
-                    "expected_result": "FAIL",
-                    "actual_result": "FAIL" if result else "PASS"
-                }
-            ))
-            
-        except Exception as e:
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Constraints & Extensions",
-                name=test_name,
-                status=TestStatus.ERROR,
-                message=f"Test execution failed: {str(e)}",
-                details={
-                    "test_id": test_id,
-                    "error": str(e),
-                    "rfc_reference": "CA flag must be true for a CA cert",
-                    "description": "Tests validation of basic constraints in certificate chains",
-                    "test_category": "Constraints and Extensions",
-                    "severity": "High",
-                    "failure_impact": "Test execution failure - cannot verify basic constraints",
-                    "troubleshooting": [
-                        "Check Python cryptography library installation",
-                        "Verify certificate file permissions",
-                        "Check certificate format and structure",
-                        "Validate certificate extensions parsing",
-                        "Review system resources and memory"
-                    ],
-                    "constraints_info": {
-                        "purpose": "Basic constraints validate CA certificate authority",
-                        "validation_requirements": "Must properly validate CA flag and path length constraints",
-                        "security_impact": "Critical for preventing unauthorized certificate authority"
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Constraints & Extensions",
+                    name=test_name,
+                    status=TestStatus.FAIL if result else TestStatus.PASS,
+                    message=f"Basic constraints violation test {'correctly failed' if result else 'incorrectly passed'}",
+                    details={
+                        "test_id": test_id,
+                        "rfc_reference": "CA flag must be true for a CA cert",
+                        "expected_result": "FAIL",
+                        "actual_result": "FAIL" if result else "PASS"
                     }
-                }
-            ))
+                ))
+            
+            except Exception as e:
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Constraints & Extensions",
+                    name=test_name,
+                    status=TestStatus.ERROR,
+                    message=f"Test execution failed: {str(e)}",
+                    details={
+                        "test_id": test_id,
+                        "error": str(e),
+                        "rfc_reference": "CA flag must be true for a CA cert",
+                        "description": "Tests validation of basic constraints in certificate chains",
+                        "test_category": "Constraints and Extensions",
+                        "severity": "High",
+                        "failure_impact": "Test execution failure - cannot verify basic constraints",
+                        "troubleshooting": [
+                            "Check Python cryptography library installation",
+                            "Verify certificate file permissions",
+                            "Check certificate format and structure",
+                            "Validate certificate extensions parsing",
+                            "Review system resources and memory"
+                        ],
+                        "constraints_info": {
+                            "purpose": "Basic constraints validate CA certificate authority",
+                            "validation_requirements": "Must properly validate CA flag and path length constraints",
+                            "security_impact": "Critical for preventing unauthorized certificate authority"
+                        }
+                    }
+                ))
         
         # Test 4.02: Path Length Constraint Violation
         test_id = "4.02"
         test_name = "Path Length Constraint Violation: Path exceeds pathLenConstraint"
         
-        try:
-            result = self._test_path_length_constraint_violation(test_inputs)
+        if should_run(test_name):
+            try:
+                result = self._test_path_length_constraint_violation(test_inputs)
             
-            # Get path length details if available
-            path_length_details = getattr(self, 'path_length_details', {})
+                # Get path length details if available
+                path_length_details = getattr(self, 'path_length_details', {})
             
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Constraints & Extensions",
-                name=test_name,
-                status=TestStatus.FAIL if result else TestStatus.PASS,
-                message=f"Path length constraint violation test {'correctly failed' if result else 'incorrectly passed'}",
-                details={
-                    "test_id": test_id,
-                    "rfc_reference": "Exceeds Max Path Length",
-                    "expected_result": "FAIL",
-                    "actual_result": "FAIL" if result else "PASS",
-                    "path_length_details": path_length_details
-                }
-            ))
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Constraints & Extensions",
+                    name=test_name,
+                    status=TestStatus.FAIL if result else TestStatus.PASS,
+                    message=f"Path length constraint violation test {'correctly failed' if result else 'incorrectly passed'}",
+                    details={
+                        "test_id": test_id,
+                        "rfc_reference": "Exceeds Max Path Length",
+                        "expected_result": "FAIL",
+                        "actual_result": "FAIL" if result else "PASS",
+                        "path_length_details": path_length_details
+                    }
+                ))
             
-        except Exception as e:
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Constraints & Extensions",
-                name=test_name,
-                status=TestStatus.ERROR,
-                message=f"Test execution failed: {str(e)}",
-                details={"test_id": test_id, "error": str(e)}
-            ))
+            except Exception as e:
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Constraints & Extensions",
+                    name=test_name,
+                    status=TestStatus.ERROR,
+                    message=f"Test execution failed: {str(e)}",
+                    details={"test_id": test_id, "error": str(e)}
+                ))
     
     def run_bridge_pki_tests(self, test_inputs: Dict[str, Any]) -> None:
         """Test Category 5: Federal Bridge PKI (Bridged and Policy) Tests"""
@@ -709,107 +720,109 @@ class PathValidationTestSuite:
         test_id = "5.01"
         test_name = "Successful Policy Mapping: Path requires Policy A; CA maps A → B; EE asserts B"
         
-        try:
-            result = self._test_policy_mapping_success(test_inputs)
+        if should_run(test_name):
+            try:
+                result = self._test_policy_mapping_success(test_inputs)
             
-            # Get policy mapping details if available
-            policy_mapping_details = getattr(self, 'policy_mapping_details', {})
+                # Get policy mapping details if available
+                policy_mapping_details = getattr(self, 'policy_mapping_details', {})
             
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Federal Bridge PKI",
-                name=test_name,
-                status=TestStatus.PASS if result else TestStatus.FAIL,
-                message=f"Policy mapping test {'correctly passed' if result else 'incorrectly failed'}",
-                details={
-                    "test_id": test_id,
-                    "rfc_reference": "Policy Mapping (Sec. 4.2.4)",
-                    "expected_result": "PASS",
-                    "actual_result": "PASS" if result else "FAIL",
-                    "policy_mapping_details": policy_mapping_details
-                }
-            ))
-            
-        except Exception as e:
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Federal Bridge PKI",
-                name=test_name,
-                status=TestStatus.ERROR,
-                message=f"Test execution failed: {str(e)}",
-                details={
-                    "test_id": test_id,
-                    "error": str(e),
-                    "rfc_reference": "Policy Mapping (Sec. 4.2.4)",
-                    "description": "Tests policy mapping functionality in Federal Bridge PKI",
-                    "test_category": "Federal Bridge PKI",
-                    "severity": "High",
-                    "failure_impact": "Test execution failure - cannot verify policy mapping",
-                    "troubleshooting": [
-                        "Check Python cryptography library installation",
-                        "Verify certificate file permissions",
-                        "Check system resources and memory",
-                        "Review certificate policy extensions",
-                        "Validate certificate chain integrity"
-                    ],
-                    "policy_mapping_info": {
-                        "purpose": "Policy mapping allows CAs to map policies between different domains",
-                        "federal_bridge_role": "Essential for Federal Bridge PKI interoperability",
-                        "validation_requirements": "Must properly handle policy mappings in certificate chains"
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Federal Bridge PKI",
+                    name=test_name,
+                    status=TestStatus.PASS if result else TestStatus.FAIL,
+                    message=f"Policy mapping test {'correctly passed' if result else 'incorrectly failed'}",
+                    details={
+                        "test_id": test_id,
+                        "rfc_reference": "Policy Mapping (Sec. 4.2.4)",
+                        "expected_result": "PASS",
+                        "actual_result": "PASS" if result else "FAIL",
+                        "policy_mapping_details": policy_mapping_details
                     }
-                }
-            ))
+                ))
+            
+            except Exception as e:
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Federal Bridge PKI",
+                    name=test_name,
+                    status=TestStatus.ERROR,
+                    message=f"Test execution failed: {str(e)}",
+                    details={
+                        "test_id": test_id,
+                        "error": str(e),
+                        "rfc_reference": "Policy Mapping (Sec. 4.2.4)",
+                        "description": "Tests policy mapping functionality in Federal Bridge PKI",
+                        "test_category": "Federal Bridge PKI",
+                        "severity": "High",
+                        "failure_impact": "Test execution failure - cannot verify policy mapping",
+                        "troubleshooting": [
+                            "Check Python cryptography library installation",
+                            "Verify certificate file permissions",
+                            "Check system resources and memory",
+                            "Review certificate policy extensions",
+                            "Validate certificate chain integrity"
+                        ],
+                        "policy_mapping_info": {
+                            "purpose": "Policy mapping allows CAs to map policies between different domains",
+                            "federal_bridge_role": "Essential for Federal Bridge PKI interoperability",
+                            "validation_requirements": "Must properly handle policy mappings in certificate chains"
+                        }
+                    }
+                ))
         
         # Test 5.02: Required Explicit Policy Violation
         test_id = "5.02"
         test_name = "Required Explicit Policy Violation: CA requires explicit policy, EE contains anyPolicy"
         
-        try:
-            result = self._test_explicit_policy_violation(test_inputs)
+        if should_run(test_name):
+            try:
+                result = self._test_explicit_policy_violation(test_inputs)
             
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Federal Bridge PKI",
-                name=test_name,
-                status=TestStatus.FAIL if result else TestStatus.PASS,
-                message=f"Explicit policy violation test {'correctly failed' if result else 'incorrectly passed'}",
-                details={
-                    "test_id": test_id,
-                    "rfc_reference": "Policy Constraints (Sec. 4.2.11)",
-                    "expected_result": "FAIL",
-                    "actual_result": "FAIL" if result else "PASS"
-                }
-            ))
-            
-        except Exception as e:
-            self.test_results.append(TestCaseResult(
-                id=f"path_validation_{test_id}",
-                category="Path Validation - Federal Bridge PKI",
-                name=test_name,
-                status=TestStatus.ERROR,
-                message=f"Test execution failed: {str(e)}",
-                details={
-                    "test_id": test_id,
-                    "error": str(e),
-                    "rfc_reference": "Policy Constraints (Sec. 4.2.11)",
-                    "description": "Tests explicit policy constraint validation in Federal Bridge PKI",
-                    "test_category": "Federal Bridge PKI",
-                    "severity": "High",
-                    "failure_impact": "Test execution failure - cannot verify policy constraints",
-                    "troubleshooting": [
-                        "Check Python cryptography library installation",
-                        "Verify certificate file permissions",
-                        "Check system resources and memory",
-                        "Review certificate policy constraints extensions",
-                        "Validate certificate chain integrity"
-                    ],
-                    "policy_constraints_info": {
-                        "purpose": "Policy constraints enforce explicit policy requirements in certificate chains",
-                        "federal_bridge_role": "Critical for Federal Bridge PKI policy enforcement",
-                        "validation_requirements": "Must properly validate policy constraints and inheritance"
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Federal Bridge PKI",
+                    name=test_name,
+                    status=TestStatus.FAIL if result else TestStatus.PASS,
+                    message=f"Explicit policy violation test {'correctly failed' if result else 'incorrectly passed'}",
+                    details={
+                        "test_id": test_id,
+                        "rfc_reference": "Policy Constraints (Sec. 4.2.11)",
+                        "expected_result": "FAIL",
+                        "actual_result": "FAIL" if result else "PASS"
                     }
-                }
-            ))
+                ))
+            
+            except Exception as e:
+                self.test_results.append(TestCaseResult(
+                    id=f"path_validation_{test_id}",
+                    category="Path Validation - Federal Bridge PKI",
+                    name=test_name,
+                    status=TestStatus.ERROR,
+                    message=f"Test execution failed: {str(e)}",
+                    details={
+                        "test_id": test_id,
+                        "error": str(e),
+                        "rfc_reference": "Policy Constraints (Sec. 4.2.11)",
+                        "description": "Tests explicit policy constraint validation in Federal Bridge PKI",
+                        "test_category": "Federal Bridge PKI",
+                        "severity": "High",
+                        "failure_impact": "Test execution failure - cannot verify policy constraints",
+                        "troubleshooting": [
+                            "Check Python cryptography library installation",
+                            "Verify certificate file permissions",
+                            "Check system resources and memory",
+                            "Review certificate policy constraints extensions",
+                            "Validate certificate chain integrity"
+                        ],
+                        "policy_constraints_info": {
+                            "purpose": "Policy constraints enforce explicit policy requirements in certificate chains",
+                            "federal_bridge_role": "Critical for Federal Bridge PKI policy enforcement",
+                            "validation_requirements": "Must properly validate policy constraints and inheritance"
+                        }
+                    }
+                ))
     
     # Helper methods for individual test implementations
     def _get_validation_error_details(self, test_inputs: Dict[str, Any]) -> Dict[str, Any]:

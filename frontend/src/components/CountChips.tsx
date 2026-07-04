@@ -1,13 +1,22 @@
 import type { RunTotals } from '../lib/api';
 
-/** Colored per-status count chips for a run's totals. Zero counts are dimmed out. */
+/**
+ * Per-status count chips for a run's totals. Zero counts are omitted.
+ * Icons + accessible labels ensure meaning without relying on color
+ * (Section 508 / WCAG 1.4.1).
+ */
 export function CountChips({ totals }: { totals: RunTotals }) {
-  const entries: Array<{ key: keyof RunTotals; cls: string; label: string }> = [
-    { key: 'pass', cls: 'pass', label: 'P' },
-    { key: 'fail', cls: 'fail', label: 'F' },
-    { key: 'warn', cls: 'warn', label: 'W' },
-    { key: 'skip', cls: 'skip', label: 'S' },
-    { key: 'error', cls: 'error', label: 'E' },
+  const entries: Array<{
+    key: keyof RunTotals;
+    cls: string;
+    glyph: string;
+    word: string;
+  }> = [
+    { key: 'pass', cls: 'pass', glyph: '✓', word: 'passed' },
+    { key: 'fail', cls: 'fail', glyph: '✕', word: 'failed' },
+    { key: 'warn', cls: 'warn', glyph: '▲', word: 'warnings' },
+    { key: 'skip', cls: 'skip', glyph: '−', word: 'skipped' },
+    { key: 'error', cls: 'error', glyph: '!', word: 'errors' },
   ];
   const visible = entries.filter((e) => (totals?.[e.key] ?? 0) > 0);
   if (visible.length === 0) {
@@ -16,8 +25,15 @@ export function CountChips({ totals }: { totals: RunTotals }) {
   return (
     <span className="count-chips">
       {visible.map((e) => (
-        <span key={e.key} className={`count-chip ${e.cls}`} title={e.key}>
-          {e.label} {totals[e.key]}
+        <span
+          key={e.key}
+          className={`count-chip ${e.cls}`}
+          title={`${totals[e.key]} ${e.word}`}
+          aria-label={`${totals[e.key]} ${e.word}`}
+        >
+          <span aria-hidden="true">
+            {e.glyph} {totals[e.key]}
+          </span>
         </span>
       ))}
     </span>

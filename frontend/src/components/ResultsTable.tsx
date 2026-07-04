@@ -41,8 +41,142 @@ function renderScalar(value: unknown): string {
   return JSON.stringify(value);
 }
 
+interface HttpRecord {
+  method?: string;
+  url?: string;
+  status_code?: number;
+  reason?: string;
+  error?: string;
+  duration_ms?: number;
+  request_bytes?: number;
+  request_body_b64?: string;
+  response_bytes?: number;
+  response_body_b64?: string;
+  response_content_type?: string;
+  curl?: string;
+  started_at?: string;
+}
+
+interface CommandRecord {
+  command?: string;
+  returncode?: number;
+  error?: string;
+  duration_ms?: number;
+  stdout_excerpt?: string;
+  stderr_excerpt?: string;
+  started_at?: string;
+}
+
+interface Diagnostics {
+  http?: HttpRecord[];
+  commands?: CommandRecord[];
+}
+
+function getDiagnostics(details: Record<string, unknown>): Diagnostics | null {
+  const diag = details['diagnostics'];
+  if (!diag || typeof diag !== 'object') return null;
+  const d = diag as Diagnostics;
+  const http = Array.isArray(d.http) ? d.http : [];
+  const commands = Array.isArray(d.commands) ? d.commands : [];
+  if (http.length === 0 && commands.length === 0) return null;
+  return { http, commands };
+}
+
+/**
+ * Troubleshooting drill-down: every HTTP exchange and external command the
+ * test performed, with reproduction hints and raw payloads.
+ */
+function DiagnosticsSection({ diag }: { diag: Diagnostics }) {
+  const http = diag.http ?? [];
+  const commands = diag.commands ?? [];
+  return (
+    <div className="diag-section">
+      {http.length > 0 && (
+        <>
+          <h4 className="diag-heading">Network requests ({http.length})</h4>
+          {http.map((h, i) => (
+            <details className="diag-item" key={i}>
+              <summary>
+                <span className="mono diag-summary-main">
+                  {h.method ?? '?'} {h.url ?? '?'}
+                </span>
+                <span className="diag-summary-meta">
+                  {h.error
+                    ? `failed: ${h.error}`
+                    : `HTTP ${h.status_code ?? '?'}${h.reason ? ` ${h.reason}` : ''}`}
+                  {typeof h.response_bytes === 'number' ? ` · ${h.response_bytes} B` : ''}
+                  {typeof h.duration_ms === 'number' ? ` · ${h.duration_ms} ms` : ''}
+                </span>
+              </summary>
+              <div className="diag-body">
+                {h.curl && (
+                  <div className="diag-field">
+                    <span className="kv-key">Reproduce with curl</span>
+                    <pre className="details-json diag-pre">{h.curl}</pre>
+                  </div>
+                )}
+                {h.request_body_b64 && (
+                  <div className="diag-field">
+                    <span className="kv-key">
+                      Request body ({h.request_bytes ?? '?'} bytes, base64 DER)
+                    </span>
+                    <pre className="details-json diag-pre">{h.request_body_b64}</pre>
+                  </div>
+                )}
+                {h.response_body_b64 && (
+                  <div className="diag-field">
+                    <span className="kv-key">
+                      Response body ({h.response_bytes ?? '?'} bytes
+                      {h.response_content_type ? `, ${h.response_content_type}` : ''}, base64)
+                    </span>
+                    <pre className="details-json diag-pre">{h.response_body_b64}</pre>
+                  </div>
+                )}
+              </div>
+            </details>
+          ))}
+        </>
+      )}
+      {commands.length > 0 && (
+        <>
+          <h4 className="diag-heading">Commands executed ({commands.length})</h4>
+          {commands.map((c, i) => (
+            <details className="diag-item" key={i}>
+              <summary>
+                <span className="mono diag-summary-main">{c.command ?? '?'}</span>
+                <span className="diag-summary-meta">
+                  {c.error ? `failed: ${c.error}` : `exit ${c.returncode ?? '?'}`}
+                  {typeof c.duration_ms === 'number' ? ` · ${c.duration_ms} ms` : ''}
+                </span>
+              </summary>
+              <div className="diag-body">
+                {c.stdout_excerpt && (
+                  <div className="diag-field">
+                    <span className="kv-key">stdout</span>
+                    <pre className="details-json diag-pre">{c.stdout_excerpt}</pre>
+                  </div>
+                )}
+                {c.stderr_excerpt && (
+                  <div className="diag-field">
+                    <span className="kv-key">stderr</span>
+                    <pre className="details-json diag-pre">{c.stderr_excerpt}</pre>
+                  </div>
+                )}
+                {!c.stdout_excerpt && !c.stderr_excerpt && (
+                  <div className="faint">No captured output.</div>
+                )}
+              </div>
+            </details>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
 function ResultDetails({ result }: { result: TestResult }) {
   const details = result.details ?? {};
+  const diagnostics = getDiagnostics(details);
   const highlights = HIGHLIGHT_FIELDS.map((f) => ({
     label: f.label,
     value: detailValue(details, f.keys),
@@ -80,8 +214,16 @@ function ResultDetails({ result }: { result: TestResult }) {
           )}
         </div>
       )}
+      {diagnostics && <DiagnosticsSection diag={diagnostics} />}
       {result.details && Object.keys(result.details).length > 0 ? (
-        <pre className="details-json">{JSON.stringify(result.details, null, 2)}</pre>
+        <details className="diag-item" style={{ marginTop: 8 }}>
+          <summary>
+            <span className="diag-summary-main">Raw test details (JSON)</span>
+          </summary>
+          <pre className="details-json" style={{ marginTop: 6 }}>
+            {JSON.stringify(result.details, null, 2)}
+          </pre>
+        </details>
       ) : (
         <div className="faint">No structured details for this test.</div>
       )}
@@ -156,12 +298,17 @@ export function ResultsTable({ results }: { results: TestResult[] }) {
   const header = (key: SortKey, label: string) => (
     <th
       className="sortable"
-      onClick={() => toggleSort(key)}
       aria-sort={sortKey === key ? (sortAsc ? 'ascending' : 'descending') : 'none'}
       scope="col"
     >
-      {label}
-      {sortKey === key && <span className="sort-arrow">{sortAsc ? '▲' : '▼'}</span>}
+      <button type="button" className="th-sort" onClick={() => toggleSort(key)}>
+        {label}
+        {sortKey === key && (
+          <span className="sort-arrow" aria-hidden="true">
+            {sortAsc ? '▲' : '▼'}
+          </span>
+        )}
+      </button>
     </th>
   );
 
@@ -183,6 +330,7 @@ export function ResultsTable({ results }: { results: TestResult[] }) {
               key={s}
               type="button"
               className={`filter-chip${statusFilter.has(s) ? ' on' : ''}`}
+              aria-pressed={statusFilter.has(s)}
               onClick={() => toggleSet(statusFilter, s, setStatusFilter)}
             >
               {s}
@@ -197,6 +345,7 @@ export function ResultsTable({ results }: { results: TestResult[] }) {
               key={c}
               type="button"
               className={`filter-chip${categoryFilter.has(c) ? ' on' : ''}`}
+              aria-pressed={categoryFilter.has(c)}
               onClick={() => toggleSet(categoryFilter, c, setCategoryFilter)}
             >
               {c}
@@ -233,7 +382,19 @@ export function ResultsTable({ results }: { results: TestResult[] }) {
                     onClick={() => setOpenId(openId === r.id ? null : r.id)}
                   >
                     <td className="nowrap muted">{r.category}</td>
-                    <td>{r.name}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="row-toggle"
+                        aria-expanded={openId === r.id}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenId(openId === r.id ? null : r.id);
+                        }}
+                      >
+                        {r.name}
+                      </button>
+                    </td>
                     <td>
                       <StatusPill status={r.status} />
                     </td>

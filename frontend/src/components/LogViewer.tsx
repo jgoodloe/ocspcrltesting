@@ -13,17 +13,25 @@ function formatLogTs(ts: string): string {
  */
 export function LogViewer({ logs }: { logs: LogLine[] }) {
   const [follow, setFollow] = useState(true);
+  const [verbose, setVerbose] = useState(false);
   const [query, setQuery] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const debugCount = useMemo(
+    () => logs.reduce((n, l) => (l.level.toUpperCase() === 'DEBUG' ? n + 1 : n), 0),
+    [logs],
+  );
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return logs;
-    return logs.filter(
+    let rows = logs;
+    if (!verbose) rows = rows.filter((l) => l.level.toUpperCase() !== 'DEBUG');
+    if (!q) return rows;
+    return rows.filter(
       (l) =>
         l.message.toLowerCase().includes(q) || l.level.toLowerCase().includes(q),
     );
-  }, [logs, query]);
+  }, [logs, query, verbose]);
 
   useEffect(() => {
     if (follow && scrollRef.current) {
@@ -49,6 +57,14 @@ export function LogViewer({ logs }: { logs: LogLine[] }) {
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Filter log lines"
         />
+        <label className="checkbox-row nowrap">
+          <input
+            type="checkbox"
+            checked={verbose}
+            onChange={(e) => setVerbose(e.target.checked)}
+          />
+          Verbose{debugCount > 0 ? ` (${debugCount})` : ''}
+        </label>
         <label className="checkbox-row nowrap">
           <input
             type="checkbox"

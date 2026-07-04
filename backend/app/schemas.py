@@ -38,6 +38,24 @@ class Categories(BaseModel):
         return [k for k in CATEGORY_KEYS if getattr(self, k)]
 
 
+class TestSelection(BaseModel):
+    """Fine-grained choice of which individual tests run.
+
+    ``mode``:
+      - ``all``    — every test in each enabled category (default).
+      - ``global`` — apply the server-wide selection stored in settings.
+      - ``custom`` — apply ``tests`` from this config only.
+
+    ``tests`` maps a category key to the list of selected test names; a
+    category absent from the map runs all of its tests.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["all", "global", "custom"] = "all"
+    tests: Dict[str, List[str]] = Field(default_factory=dict)
+
+
 class RunConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -58,6 +76,7 @@ class RunConfig(BaseModel):
     require_explicit_policy: bool = False
     inhibit_policy_mapping: bool = False
     categories: Categories = Field(default_factory=Categories)
+    test_selection: TestSelection = Field(default_factory=TestSelection)
     profile_id: Optional[int] = None
 
     @field_validator("ocsp_url", "crl_urls")
@@ -179,6 +198,41 @@ class ProfileOut(BaseModel):
 
 class ProfileList(BaseModel):
     items: List[ProfileOut]
+
+
+class CatalogTestOut(BaseModel):
+    name: str
+    description: str = ""
+    dynamic: bool = False
+
+
+class CatalogCategoryOut(BaseModel):
+    key: str
+    label: str
+    tests: List[CatalogTestOut]
+
+
+class TestCatalogOut(BaseModel):
+    categories: List[CatalogCategoryOut]
+
+
+class GlobalTestSelection(BaseModel):
+    """Server-wide default test selection, applied to runs whose config uses
+    ``test_selection.mode == "global"``. ``tests = null`` means run all."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tests: Optional[Dict[str, List[str]]] = None
+    updated_at: Optional[datetime] = None
+
+
+class RunProfileIn(BaseModel):
+    """Payload for saving a finished run's configuration as a profile."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=2000)
 
 
 class HealthOut(BaseModel):

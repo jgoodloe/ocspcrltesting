@@ -33,6 +33,18 @@ export interface CategoryFlags {
   security: boolean;
 }
 
+export type TestSelectionMode = 'all' | 'global' | 'custom';
+
+/**
+ * Fine-grained choice of which individual tests run.
+ * `tests` maps a category key to the selected test names; a category absent
+ * from the map runs all of its tests.
+ */
+export interface TestSelection {
+  mode: TestSelectionMode;
+  tests: Record<string, string[]>;
+}
+
 export interface RunConfig {
   name?: string | null;
   ocsp_url: string;
@@ -51,7 +63,31 @@ export interface RunConfig {
   require_explicit_policy: boolean;
   inhibit_policy_mapping: boolean;
   categories: CategoryFlags;
+  test_selection: TestSelection;
   profile_id?: number | null;
+}
+
+export interface CatalogTest {
+  name: string;
+  description: string;
+  /** Name is a stable prefix; the run may emit one result per input (e.g. per CRL URL). */
+  dynamic: boolean;
+}
+
+export interface CatalogCategory {
+  key: string;
+  label: string;
+  tests: CatalogTest[];
+}
+
+export interface TestCatalog {
+  categories: CatalogCategory[];
+}
+
+/** Server-wide default selection; `tests = null` means run everything. */
+export interface GlobalTestSelection {
+  tests: Record<string, string[]> | null;
+  updated_at: string | null;
 }
 
 export interface RunTotals {
@@ -382,6 +418,38 @@ export function deleteRun(runId: string): Promise<void> {
   });
 }
 
+/** Save an existing run's configuration as a reusable profile. */
+export function saveRunAsProfile(
+  runId: string,
+  input: { name: string; description?: string | null },
+): Promise<Profile> {
+  return request<Profile>(
+    `/test-runs/${encodeURIComponent(runId)}/profile`,
+    jsonInit('POST', input),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Test catalog and global test selection
+// ---------------------------------------------------------------------------
+
+export function getTestCatalog(): Promise<TestCatalog> {
+  return request<TestCatalog>('/test-catalog');
+}
+
+export function getGlobalTestSelection(): Promise<GlobalTestSelection> {
+  return request<GlobalTestSelection>('/settings/test-selection');
+}
+
+export function putGlobalTestSelection(
+  tests: Record<string, string[]> | null,
+): Promise<GlobalTestSelection> {
+  return request<GlobalTestSelection>(
+    '/settings/test-selection',
+    jsonInit('PUT', { tests }),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Profiles
 // ---------------------------------------------------------------------------
@@ -443,6 +511,7 @@ export function defaultRunConfig(): RunConfig {
       performance: false,
       security: true,
     },
+    test_selection: { mode: 'all', tests: {} },
     profile_id: null,
   };
 }
