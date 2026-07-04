@@ -130,6 +130,13 @@ With `mode: "global"` the server-wide selection (see
 on the run as `config.resolved_test_selection` (`null` = all tests ran).
 Test names must match the catalog from `GET /api/test-catalog`.
 
+`saved_certs` (optional) maps an upload slot (`issuer_cert`, `good_cert`,
+`revoked_cert`, `unknown_ca_cert`, `trust_anchor`) to a saved CA library id
+(see `/api/ca-certs`); the referenced certificate is used exactly as if it
+had been uploaded. A slot may come from a file or the library, not both;
+`issuer_cert` must come from one of the two. Client TLS material can never
+come from the library.
+
 Response `201`: a **RunSummary** (see below) with status `queued` or `running`.
 
 Errors: `400` invalid config/certificate, `413` upload too large,
@@ -321,7 +328,8 @@ The individual tests each category can run — the vocabulary for
       "tests": [
         { "name": "HTTP GET transport",
           "description": "Responder accepts RFC 6960 base64 GET requests",
-          "dynamic": false }
+          "dynamic": false,
+          "scope": "ocsp" }
       ]
     }
   ]
@@ -329,7 +337,8 @@ The individual tests each category can run — the vocabulary for
 ```
 
 `dynamic: true` marks tests whose name is a stable prefix and which may emit
-one result per input (e.g. `Fetch and parse CRL: <url>`).
+one result per input (e.g. `Fetch and parse CRL: <url>`). `scope` marks what
+the test exercises: `ocsp`, `crl`, `crl+ocsp`, `path`, or `ikev2`.
 
 ### `GET /api/settings/test-selection`
 The server-wide default selection applied to runs whose config uses
@@ -345,3 +354,36 @@ The server-wide default selection applied to runs whose config uses
 Body `{ "tests": {category: [test name, ...]} | null }`. Category keys and
 test names are validated against the catalog (`400` on unknown entries).
 Response: the stored selection.
+
+---
+
+## Saved CA certificate library
+
+Store commonly used root / issuing CA certificates once and reference them
+in run configs via `saved_certs` instead of re-uploading files.
+
+### `GET /api/ca-certs`
+`{ "items": [CACert, ...] }` where CACert is
+`{ id, name, subject, issuer, serial_number, fingerprint_sha256, not_before,
+not_after, is_ca, expired, self_signed, source, source_url, created_at }`.
+
+### `POST /api/ca-certs` — multipart upload
+Fields: `file` (PEM, DER, PEM bundle, or PKCS#7 `.p7c`/`.p7b`), optional
+`name` query param (applies when the file holds a single certificate).
+Bundles create one entry per certificate; duplicates (by SHA-256
+fingerprint) are skipped. Response `201`:
+`{ "created": [CACert, ...], "skipped_duplicates": 0 }`.
+
+### `POST /api/ca-certs/fetch`
+Body `{ "url": "http://repo.fpki.gov/fcpca/fcpcag2.crt", "name": null }`.
+The server downloads the certificate (SSRF policy applies, 2 MiB cap) and
+imports it like an upload. `403` when blocked by policy, `502` on fetch
+failure, `400` when the payload is not certificate data.
+
+### `GET /api/ca-certs/well-known`
+Curated list of well-known Federal PKI CAs
+(`{ key, name, url, description }`) for one-click import via `/fetch`.
+
+### `DELETE /api/ca-certs/{id}` — `204`.
+Runs already created keep their materialized copy; profiles referencing the
+deleted id fail run creation with a clear `400`.

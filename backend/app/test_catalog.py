@@ -19,10 +19,11 @@ class CatalogTest(TypedDict):
     name: str
     description: str
     dynamic: bool
+    scope: str  # what the test exercises: ocsp | crl | crl+ocsp | path | ikev2
 
 
-def _t(name: str, description: str, dynamic: bool = False) -> CatalogTest:
-    return {"name": name, "description": description, "dynamic": dynamic}
+def _t(name: str, description: str, dynamic: bool = False, scope: str = "ocsp") -> CatalogTest:
+    return {"name": name, "description": description, "dynamic": dynamic, "scope": scope}
 
 
 # Keyed by the RunConfig category keys (schemas.CATEGORY_KEYS).
@@ -53,78 +54,63 @@ TEST_CATALOG: Dict[str, List[CatalogTest]] = {
         _t("Response timestamp validation", "Response timestamps are internally consistent"),
         _t(
             "CRL Distribution Point extraction from certificate",
-            "CDP URLs can be extracted from the certificate under test",
-        ),
+            "CDP URLs can be extracted from the certificate under test", scope="crl"),
         _t(
             "CRL download and parsing from certificate CRL Distribution Points",
-            "CRLs referenced by the certificate download and parse",
-        ),
-        _t("CRL Distribution Point accessibility", "Each CDP URL is reachable"),
-        _t("CRL signature verification", "Downloaded CRL signature verifies against the issuer"),
-        _t("CRL timestamp validation", "CRL thisUpdate/nextUpdate are present and current"),
-        _t("Certificate revocation status check", "Certificate serial checked against the CRL entries"),
-        _t("CRL vs OCSP consistency check", "CRL and OCSP agree on revocation status"),
+            "CRLs referenced by the certificate download and parse", scope="crl"),
+        _t("CRL Distribution Point accessibility", "Each CDP URL is reachable", scope="crl"),
+        _t("CRL signature verification", "Downloaded CRL signature verifies against the issuer", scope="crl"),
+        _t("CRL timestamp validation", "CRL thisUpdate/nextUpdate are present and current", scope="crl"),
+        _t("Certificate revocation status check", "Certificate serial checked against the CRL entries", scope="crl"),
+        _t("CRL vs OCSP consistency check", "CRL and OCSP agree on revocation status", scope="crl+ocsp"),
         _t(
             "Fetch and parse CRL",
             "Fetch/parse checks for each explicitly supplied CRL URL",
-            dynamic=True,
-        ),
+            dynamic=True, scope="crl"),
     ],
     "path_validation": [
         _t(
             "Valid Path (Success): End-entity -> Intermediate CA -> Trusted Root",
-            "Baseline chain builds and validates to the trust anchor",
-        ),
+            "Baseline chain builds and validates to the trust anchor", scope="path"),
         _t(
             "Invalid Signature (EE): EE certificate's signature cannot be verified",
-            "Tampered end-entity signature is rejected",
-        ),
+            "Tampered end-entity signature is rejected", scope="path"),
         _t(
             "Invalid Signature (Intermediate): Intermediate CA certificate's signature is invalid",
-            "Tampered intermediate signature is rejected",
-        ),
+            "Tampered intermediate signature is rejected", scope="path"),
         _t(
             "Issuer/Subject Mismatch: The Issuer DN of the child cert does not match the Subject DN of the parent cert",
-            "Broken issuer/subject chaining is rejected",
-        ),
+            "Broken issuer/subject chaining is rejected", scope="path"),
         _t(
             "notAfter Expired (EE): Validation time after EE certificate's notAfter",
-            "Expired end-entity certificate is rejected",
-        ),
+            "Expired end-entity certificate is rejected", scope="path"),
         _t(
             "Revocation Status Expired: CRL has expired (nextUpdate in past)",
-            "Stale CRL is not accepted as current revocation data",
-        ),
+            "Stale CRL is not accepted as current revocation data", scope="crl"),
         _t(
             "Revoked (EE) in Fresh CRL: EE serial number on most recent CRL",
-            "Revoked end-entity via CRL is rejected",
-        ),
+            "Revoked end-entity via CRL is rejected", scope="crl"),
         _t(
             "Revoked (EE) by OCSP: OCSP response is revoked status",
-            "Revoked end-entity via OCSP is rejected",
-        ),
+            "Revoked end-entity via OCSP is rejected", scope="ocsp"),
         _t(
             "Basic Constraints Violation: Intermediate CA cert has cA = false",
-            "Non-CA intermediate is rejected",
-        ),
+            "Non-CA intermediate is rejected", scope="path"),
         _t(
             "Path Length Constraint Violation: Path exceeds pathLenConstraint",
-            "pathLenConstraint violations are rejected",
-        ),
+            "pathLenConstraint violations are rejected", scope="path"),
         _t(
             "Successful Policy Mapping: Path requires Policy A; CA maps A → B; EE asserts B",
-            "Policy mapping across a bridge validates",
-        ),
+            "Policy mapping across a bridge validates", scope="path"),
         _t(
             "Required Explicit Policy Violation: CA requires explicit policy, EE contains anyPolicy",
-            "requireExplicitPolicy violations are rejected",
-        ),
+            "requireExplicitPolicy violations are rejected", scope="path"),
     ],
     "ikev2": [
-        _t("OCSP Content extension (type 14) support", "RFC 4806 OCSP Content certificate encoding"),
-        _t("CERTREQ with encoding 14 elicits CERT with OCSP", "Responder participates in IKEv2 OCSP exchange"),
-        _t("Trusted responder identification", "Trusted responder configuration is identified"),
-        _t("Configuration mapping (request/reply/both)", "IKEv2 OCSP request/reply configuration mapping"),
+        _t("OCSP Content extension (type 14) support", "RFC 4806 OCSP Content certificate encoding", scope="ikev2"),
+        _t("CERTREQ with encoding 14 elicits CERT with OCSP", "Responder participates in IKEv2 OCSP exchange", scope="ikev2"),
+        _t("Trusted responder identification", "Trusted responder configuration is identified", scope="ikev2"),
+        _t("Configuration mapping (request/reply/both)", "IKEv2 OCSP request/reply configuration mapping", scope="ikev2"),
     ],
     "federal": [
         _t("Federal PKI environment detection", "Detect Federal PKI agency/CA indicators in the response"),

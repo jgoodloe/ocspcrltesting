@@ -64,14 +64,58 @@ export interface RunConfig {
   inhibit_policy_mapping: boolean;
   categories: CategoryFlags;
   test_selection: TestSelection;
+  /** Saved CA library references: {upload slot -> CACertificate id}. */
+  saved_certs: Record<string, number>;
   profile_id?: number | null;
 }
+
+/** Slots that may be filled from the saved CA library instead of an upload. */
+export const SAVED_CERT_SLOTS = [
+  'issuer_cert',
+  'good_cert',
+  'revoked_cert',
+  'unknown_ca_cert',
+  'trust_anchor',
+] as const;
+
+export type SavedCertSlot = (typeof SAVED_CERT_SLOTS)[number];
 
 export interface CatalogTest {
   name: string;
   description: string;
   /** Name is a stable prefix; the run may emit one result per input (e.g. per CRL URL). */
   dynamic: boolean;
+  /** What the test exercises: 'ocsp' | 'crl' | 'crl+ocsp' | 'path' | 'ikev2'. */
+  scope: string;
+}
+
+export interface CACert {
+  id: number;
+  name: string;
+  subject: string;
+  issuer: string;
+  serial_number: string;
+  fingerprint_sha256: string;
+  not_before: string;
+  not_after: string;
+  is_ca: boolean;
+  expired: boolean;
+  self_signed: boolean;
+  source: string;
+  source_url: string | null;
+  created_at: string;
+}
+
+export interface CACertImportResult {
+  created: CACert[];
+  skipped_duplicates: number;
+}
+
+export interface WellKnownCA {
+  key: string;
+  name: string;
+  url: string;
+  description: string;
 }
 
 export interface CatalogCategory {
@@ -218,9 +262,10 @@ export interface ProfileListResponse {
   items: Profile[];
 }
 
-/** Named optional certificate/key uploads for POST /api/test-runs. */
+/** Named optional certificate/key uploads for POST /api/test-runs.
+ * issuer_cert may be omitted when config.saved_certs provides it. */
 export interface RunFiles {
-  issuer_cert: File;
+  issuer_cert?: File | null;
   good_cert?: File | null;
   revoked_cert?: File | null;
   unknown_ca_cert?: File | null;
@@ -333,8 +378,8 @@ export function inspectCertificate(file: File): Promise<CertMetadata> {
 export function createRun(config: RunConfig, files: RunFiles): Promise<RunSummary> {
   const form = new FormData();
   form.append('config', JSON.stringify(config));
-  form.append('issuer_cert', files.issuer_cert, files.issuer_cert.name);
   const optional: Array<[string, File | null | undefined]> = [
+    ['issuer_cert', files.issuer_cert],
     ['good_cert', files.good_cert],
     ['revoked_cert', files.revoked_cert],
     ['unknown_ca_cert', files.unknown_ca_cert],
@@ -430,6 +475,36 @@ export function saveRunAsProfile(
 }
 
 // ---------------------------------------------------------------------------
+// Saved CA certificate library
+// ---------------------------------------------------------------------------
+
+export function listCACerts(): Promise<{ items: CACert[] }> {
+  return request<{ items: CACert[] }>('/ca-certs');
+}
+
+export function listWellKnownCAs(): Promise<{ items: WellKnownCA[] }> {
+  return request<{ items: WellKnownCA[] }>('/ca-certs/well-known');
+}
+
+export function uploadCACert(file: File, name?: string): Promise<CACertImportResult> {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  const qs = name ? `?name=${encodeURIComponent(name)}` : '';
+  return request<CACertImportResult>(`/ca-certs${qs}`, { method: 'POST', body: form });
+}
+
+export function fetchCACert(url: string, name?: string): Promise<CACertImportResult> {
+  return request<CACertImportResult>(
+    '/ca-certs/fetch',
+    jsonInit('POST', { url, name: name || null }),
+  );
+}
+
+export function deleteCACert(id: number): Promise<void> {
+  return request<void>(`/ca-certs/${id}`, { method: 'DELETE' });
+}
+
+// ---------------------------------------------------------------------------
 // Test catalog and global test selection
 // ---------------------------------------------------------------------------
 
@@ -512,6 +587,7 @@ export function defaultRunConfig(): RunConfig {
       security: true,
     },
     test_selection: { mode: 'all', tests: {} },
+    saved_certs: {},
     profile_id: null,
   };
 }

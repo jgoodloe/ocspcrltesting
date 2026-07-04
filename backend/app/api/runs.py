@@ -21,7 +21,7 @@ from ..certs import (
 from ..db import get_session
 from ..exports import build_csv_export, build_json_export
 from ..jobs import TERMINAL_STATUSES, get_job_manager
-from ..orm import Profile, Result, Run, RunEvent
+from ..orm import CACertificate, Profile, Result, Run, RunEvent
 from ..schemas import (
     LogLine,
     LogList,
@@ -63,7 +63,7 @@ async def _get_run_or_404(session: AsyncSession, run_id: str) -> Run:
 @router.post("/test-runs", response_model=RunSummary, status_code=201)
 async def create_run(
     config: str = Form(...),
-    issuer_cert: UploadFile = ...,
+    issuer_cert: Optional[UploadFile] = None,
     good_cert: Optional[UploadFile] = None,
     revoked_cert: Optional[UploadFile] = None,
     unknown_ca_cert: Optional[UploadFile] = None,
@@ -125,6 +125,25 @@ async def create_run(
         stored_files[slot] = str(path)
         file_names[slot] = upload.filename or slot
 
+    async def _store_saved_certs() -> None:
+        """Materialize saved CA-library references into the workspace, the
+        same way uploaded files are stored."""
+        for slot, cert_id in run_config.saved_certs.items():
+            if slot in stored_files:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{slot}: both an uploaded file and a saved certificate were provided",
+                )
+            saved = await session.get(CACertificate, cert_id)
+            if saved is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{slot}: saved certificate #{cert_id} not found in the CA library",
+                )
+            path = workspace.save_upload(slot, saved.pem.encode("ascii"))
+            stored_files[slot] = str(path)
+            file_names[slot] = f"{saved.name} (saved CA)"
+
     try:
         await _store_cert("issuer_cert", issuer_cert)
         await _store_cert("good_cert", good_cert)
@@ -141,6 +160,12 @@ async def create_run(
             path = workspace.save_upload("client_key", key_data, sensitive=True)
             stored_files["client_key"] = str(path)
             file_names["client_key"] = client_key.filename or "client_key"
+        await _store_saved_certs()
+        if "issuer_cert" not in stored_files:
+            raise HTTPException(
+                status_code=400,
+                detail="issuer_cert is required: upload a file or select a saved CA certificate",
+            )
     except HTTPException:
         workspace.delete()
         raise

@@ -28,6 +28,13 @@ const ICONS = {
       <path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z" />
     </svg>
   ),
+  caLibrary: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="9" r="6" />
+      <path d="M9 14.5L7.5 21l4.5-2.5L16.5 21 15 14.5" />
+      <circle cx="12" cy="9" r="2.5" />
+    </svg>
+  ),
   settings: (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="12" cy="12" r="3" />
@@ -88,6 +95,10 @@ export function App() {
           <NavLink to="/profiles" className={linkClass}>
             {ICONS.profiles}
             Profiles
+          </NavLink>
+          <NavLink to="/ca-library" className={linkClass}>
+            {ICONS.caLibrary}
+            CA Library
           </NavLink>
           <NavLink to="/settings" className={linkClass}>
             {ICONS.settings}

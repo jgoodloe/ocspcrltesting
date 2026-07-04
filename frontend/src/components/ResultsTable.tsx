@@ -2,6 +2,7 @@ import { Fragment, useMemo, useState } from 'react';
 import type { ResultStatus, TestResult } from '../lib/api';
 import { formatDurationMs } from '../lib/format';
 import { StatusPill } from './StatusPill';
+import { ScopeBadge, useTestCatalog } from './TestSelectionEditor';
 
 type SortKey = 'category' | 'name' | 'status' | 'duration_ms';
 
@@ -242,6 +243,28 @@ export function ResultsTable({ results }: { results: TestResult[] }) {
   const [categoryFilter, setCategoryFilter] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
+  const { catalog } = useTestCatalog();
+
+  // Marks each result with what it exercises (OCSP / CRL / path…), looked up
+  // by exact catalog name, with prefix matching for dynamic test names.
+  const scopeOf = useMemo(() => {
+    const exact = new Map<string, string>();
+    const prefixes: Array<[string, string]> = [];
+    for (const cat of catalog?.categories ?? []) {
+      for (const t of cat.tests) {
+        exact.set(t.name, t.scope);
+        if (t.dynamic) prefixes.push([t.name, t.scope]);
+      }
+    }
+    return (name: string): string | undefined => {
+      const hit = exact.get(name);
+      if (hit) return hit;
+      for (const [prefix, scope] of prefixes) {
+        if (name.startsWith(prefix)) return scope;
+      }
+      return undefined;
+    };
+  }, [catalog]);
 
   const categories = useMemo(
     () => Array.from(new Set(results.map((r) => r.category))).sort(),
@@ -393,7 +416,8 @@ export function ResultsTable({ results }: { results: TestResult[] }) {
                         }}
                       >
                         {r.name}
-                      </button>
+                      </button>{' '}
+                      <ScopeBadge scope={scopeOf(r.name)} />
                     </td>
                     <td>
                       <StatusPill status={r.status} />

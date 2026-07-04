@@ -77,7 +77,21 @@ class RunConfig(BaseModel):
     inhibit_policy_mapping: bool = False
     categories: Categories = Field(default_factory=Categories)
     test_selection: TestSelection = Field(default_factory=TestSelection)
+    # Saved CA library references: {upload slot -> CACertificate id}. The
+    # referenced certificate is materialized into the run workspace exactly
+    # like an uploaded file. Client TLS material can never come from the
+    # library.
+    saved_certs: Dict[str, int] = Field(default_factory=dict)
     profile_id: Optional[int] = None
+
+    @field_validator("saved_certs")
+    @classmethod
+    def _saved_cert_slots(cls, v: Dict[str, int]) -> Dict[str, int]:
+        allowed = {"issuer_cert", "good_cert", "revoked_cert", "unknown_ca_cert", "trust_anchor"}
+        for slot in v:
+            if slot not in allowed:
+                raise ValueError(f"saved_certs slot must be one of {sorted(allowed)}, got {slot!r}")
+        return v
 
     @field_validator("ocsp_url", "crl_urls")
     @classmethod
@@ -204,6 +218,8 @@ class CatalogTestOut(BaseModel):
     name: str
     description: str = ""
     dynamic: bool = False
+    # What the test exercises: "ocsp" | "crl" | "crl+ocsp" | "path" | "ikev2"
+    scope: str = "ocsp"
 
 
 class CatalogCategoryOut(BaseModel):
@@ -224,6 +240,57 @@ class GlobalTestSelection(BaseModel):
 
     tests: Optional[Dict[str, List[str]]] = None
     updated_at: Optional[datetime] = None
+
+
+class CACertOut(BaseModel):
+    id: int
+    name: str
+    subject: str
+    issuer: str
+    serial_number: str
+    fingerprint_sha256: str
+    not_before: datetime
+    not_after: datetime
+    is_ca: bool
+    expired: bool
+    self_signed: bool
+    source: str
+    source_url: Optional[str] = None
+    created_at: datetime
+
+
+class CACertList(BaseModel):
+    items: List[CACertOut]
+
+
+class CACertImportResult(BaseModel):
+    created: List[CACertOut]
+    skipped_duplicates: int = 0
+
+
+class CACertFetchIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(min_length=1, max_length=2000)
+    name: Optional[str] = Field(default=None, max_length=200)
+
+    @field_validator("url")
+    @classmethod
+    def _must_be_http(cls, v: str) -> str:
+        if not v.lower().startswith(("http://", "https://")):
+            raise ValueError("URL must be http(s)")
+        return v
+
+
+class WellKnownCA(BaseModel):
+    key: str
+    name: str
+    url: str
+    description: str = ""
+
+
+class WellKnownCAList(BaseModel):
+    items: List[WellKnownCA]
 
 
 class RunProfileIn(BaseModel):

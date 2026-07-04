@@ -39,8 +39,8 @@ Emit = Callable[[str, Dict[str, Any]], None]
 CATEGORY_LABELS = {
     "protocol": "OCSP protocol tests",
     "status": "Certificate status tests",
-    "security": "Security & error handling tests",
-    "performance": "Performance tests",
+    "security": "Security & error handling tests (OCSP)",
+    "performance": "Performance tests (OCSP)",
     "crl": "CRL tests",
     "ikev2": "IKEv2 tests",
     "federal": "Federal PKI / Federal Bridge tests",

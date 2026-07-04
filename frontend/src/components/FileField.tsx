@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { ApiError, inspectCertificate, type CertMetadata } from '../lib/api';
+import { ApiError, inspectCertificate, type CACert, type CertMetadata } from '../lib/api';
 import { CertMetaCard } from './CertMetaCard';
 
 export interface FileFieldProps {
@@ -14,6 +14,11 @@ export interface FileFieldProps {
   file: File | null;
   onChange: (file: File | null) => void;
   accept?: string;
+  /** Saved CA library entries offered as an alternative to uploading. */
+  savedOptions?: CACert[];
+  /** Selected saved certificate id (mutually exclusive with a file). */
+  savedId?: number | null;
+  onSavedChange?: (id: number | null) => void;
 }
 
 /**
@@ -28,6 +33,9 @@ export function FileField({
   file,
   onChange,
   accept = '.pem,.crt,.cer,.der,.key',
+  savedOptions,
+  savedId,
+  onSavedChange,
 }: FileFieldProps) {
   const [meta, setMeta] = useState<CertMetadata | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +80,7 @@ export function FileField({
           type="file"
           accept={accept}
           aria-label={label}
+          disabled={savedId != null}
           onChange={(e) => void handleSelect(e.target.files?.[0] ?? null)}
         />
         {file && (
@@ -80,6 +89,33 @@ export function FileField({
           </button>
         )}
       </div>
+      {savedOptions && savedOptions.length > 0 && onSavedChange && (
+        <select
+          className="select"
+          value={savedId != null ? String(savedId) : ''}
+          disabled={file !== null}
+          aria-label={`${label}: use a saved CA certificate`}
+          onChange={(e) => {
+            const value = e.target.value ? Number(e.target.value) : null;
+            onSavedChange(value);
+            if (value !== null) clear();
+          }}
+        >
+          <option value="">…or use a saved CA certificate</option>
+          {savedOptions.map((c) => (
+            <option key={c.id} value={String(c.id)}>
+              {c.name}
+              {c.expired ? ' (expired)' : ''}
+            </option>
+          ))}
+        </select>
+      )}
+      {savedId != null && (
+        <span className="field-hint">
+          Using saved certificate from the CA library — clear the selection to upload a file
+          instead.
+        </span>
+      )}
       {hint && <span className="field-hint">{hint}</span>}
       {sensitive && file && (
         <span className="field-hint mono">

@@ -106,6 +106,28 @@ class AppSetting(Base):
         return json.loads(self.value_json or "{}")
 
 
+class CACertificate(Base):
+    """Saved CA certificate library: commonly used roots and issuing CAs the
+    user can reference in a run instead of re-uploading files."""
+
+    __tablename__ = "ca_certificates"
+    __table_args__ = (UniqueConstraint("fingerprint_sha256", name="uq_ca_certificates_fingerprint"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200))
+    pem: Mapped[str] = mapped_column(Text)
+    subject: Mapped[str] = mapped_column(Text)
+    issuer: Mapped[str] = mapped_column(Text)
+    serial_number: Mapped[str] = mapped_column(Text)
+    fingerprint_sha256: Mapped[str] = mapped_column(String(64))
+    not_before: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    not_after: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    is_ca: Mapped[int] = mapped_column(Integer, default=0)
+    source: Mapped[str] = mapped_column(String(20), default="upload")  # upload | url | well-known
+    source_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Profile(Base):
     __tablename__ = "profiles"
     __table_args__ = (UniqueConstraint("name", name="uq_profiles_name"),)

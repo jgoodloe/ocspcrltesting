@@ -8,6 +8,24 @@ import {
 
 let catalogCache: TestCatalog | null = null;
 
+const SCOPE_LABELS: Record<string, string> = {
+  ocsp: 'OCSP',
+  crl: 'CRL',
+  'crl+ocsp': 'CRL+OCSP',
+  path: 'Path',
+  ikev2: 'IKEv2',
+};
+
+/** Small badge marking what a test exercises (OCSP vs CRL vs path…). */
+export function ScopeBadge({ scope }: { scope: string | undefined }) {
+  if (!scope) return null;
+  return (
+    <span className={`scope-badge scope-${scope.replace('+', '-')}`}>
+      {SCOPE_LABELS[scope] ?? scope.toUpperCase()}
+    </span>
+  );
+}
+
 /** Fetch the test catalog once per app session. */
 export function useTestCatalog(): { catalog: TestCatalog | null; error: string | null } {
   const [catalog, setCatalog] = useState<TestCatalog | null>(catalogCache);
@@ -156,7 +174,9 @@ function CategorySection({
                   onChange={() => toggleTest(t.name)}
                 />
                 <span>
-                  <span className="tsel-test-name">{t.name}</span>
+                  <span className="tsel-test-name">
+                    {t.name} <ScopeBadge scope={t.scope} />
+                  </span>
                   {t.description && <span className="tsel-test-desc">{t.description}</span>}
                 </span>
               </label>

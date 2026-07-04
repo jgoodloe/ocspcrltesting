@@ -50,6 +50,30 @@ def load_certificate_chain(data: bytes) -> List[x509.Certificate]:
     return [load_certificate(data)]
 
 
+def load_certificates_any(data: bytes) -> List[x509.Certificate]:
+    """Load certificates from PEM/DER/PEM-bundle or a PKCS#7 (.p7c/.p7b)
+    bundle — the formats CA repositories publish (FPKI AIA files are P7C)."""
+    try:
+        return load_certificate_chain(data)
+    except CertificateError:
+        pass
+    try:
+        from asn1crypto import cms
+
+        content_info = cms.ContentInfo.load(data)
+        if content_info["content_type"].dotted != "1.2.840.113549.1.7.2":
+            raise ValueError("not a PKCS#7 SignedData structure")
+        certificates = content_info["content"]["certificates"]
+        certs = [x509.load_der_x509_certificate(c.dump()) for c in certificates or []]
+        if not certs:
+            raise ValueError("PKCS#7 bundle contains no certificates")
+        return certs
+    except Exception:
+        raise CertificateError(
+            "Data is not a valid X.509 certificate, PEM bundle, or PKCS#7 certificate bundle"
+        ) from None
+
+
 def to_pem(certs: List[x509.Certificate]) -> bytes:
     return b"".join(c.public_bytes(serialization.Encoding.PEM) for c in certs)
 

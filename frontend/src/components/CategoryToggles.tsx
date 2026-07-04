@@ -11,8 +11,8 @@ export const CATEGORY_DEFS: Array<{
   { key: 'path_validation', name: 'Path validation', desc: 'RFC 5280 chain building and policies' },
   { key: 'ikev2', name: 'IKEv2', desc: 'IKEv2 OCSP payload compatibility' },
   { key: 'federal', name: 'Federal PKI / Federal Bridge', desc: 'FPKI profile and bridge CA checks' },
-  { key: 'performance', name: 'Performance', desc: 'latency sampling and optional load test' },
-  { key: 'security', name: 'Security & error handling', desc: 'malformed input, replay, error robustness' },
+  { key: 'performance', name: 'Performance (OCSP)', desc: 'OCSP responder latency sampling and optional load test' },
+  { key: 'security', name: 'Security & error handling (OCSP)', desc: 'OCSP malformed input, replay, error robustness' },
 ];
 
 export function CategoryToggles({

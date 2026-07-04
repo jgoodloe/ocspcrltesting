@@ -7,9 +7,12 @@ import {
   createProfile,
   createRun,
   defaultRunConfig,
+  listCACerts,
   listProfiles,
+  type CACert,
   type Profile,
   type RunConfig,
+  type SavedCertSlot,
 } from '../lib/api';
 
 interface FileState {
@@ -47,6 +50,7 @@ export function NewRun() {
   const [searchParams] = useSearchParams();
   const [config, setConfig] = useState<RunConfig>(defaultRunConfig);
   const [files, setFiles] = useState<FileState>(EMPTY_FILES);
+  const [savedCAs, setSavedCAs] = useState<CACert[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [selectedProfile, setSelectedProfile] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -62,6 +66,13 @@ export function NewRun() {
 
   useEffect(() => {
     let cancelled = false;
+    listCACerts()
+      .then((res) => {
+        if (!cancelled) setSavedCAs(res.items);
+      })
+      .catch(() => {
+        /* the CA library is optional for this page */
+      });
     listProfiles()
       .then((res) => {
         if (cancelled) return;
@@ -95,6 +106,20 @@ export function NewRun() {
   const setFile = (key: keyof FileState) => (file: File | null) =>
     setFiles((prev) => ({ ...prev, [key]: file }));
 
+  const setSavedCert = (slot: SavedCertSlot) => (id: number | null) =>
+    setConfig((prev) => {
+      const next = { ...prev.saved_certs };
+      if (id === null) delete next[slot];
+      else next[slot] = id;
+      return { ...prev, saved_certs: next };
+    });
+
+  const savedPickerProps = (slot: SavedCertSlot) => ({
+    savedOptions: savedCAs,
+    savedId: config.saved_certs[slot] ?? null,
+    onSavedChange: setSavedCert(slot),
+  });
+
   const handleSaveProfile = async () => {
     setSaveError(null);
     if (!saveName.trim()) {
@@ -125,8 +150,8 @@ export function NewRun() {
       setError({ detail: 'OCSP responder URL is required.' });
       return;
     }
-    if (!files.issuer_cert) {
-      setError({ detail: 'Issuer certificate is required.' });
+    if (!files.issuer_cert && !config.saved_certs.issuer_cert) {
+      setError({ detail: 'Issuer certificate is required (upload a file or pick a saved CA).' });
       return;
     }
     setSubmitting(true);
@@ -139,6 +164,8 @@ export function NewRun() {
       };
       const run = await createRun(payload, {
         issuer_cert: files.issuer_cert,
+        // Saved-CA slots ride in payload.saved_certs; the backend rejects a
+        // slot that has both a file and a saved reference.
         good_cert: files.good_cert,
         revoked_cert: files.revoked_cert,
         unknown_ca_cert: files.unknown_ca_cert,
@@ -292,30 +319,35 @@ export function NewRun() {
               hint="CA that issued the certificates under test (PEM or DER)"
               file={files.issuer_cert}
               onChange={setFile('issuer_cert')}
+              {...savedPickerProps('issuer_cert')}
             />
             <FileField
               label="Known-good certificate"
               hint="leaf expected to be reported as good"
               file={files.good_cert}
               onChange={setFile('good_cert')}
+              {...savedPickerProps('good_cert')}
             />
             <FileField
               label="Known-revoked certificate"
               hint="leaf expected to be reported as revoked"
               file={files.revoked_cert}
               onChange={setFile('revoked_cert')}
+              {...savedPickerProps('revoked_cert')}
             />
             <FileField
               label="Unknown-CA certificate"
               hint="cert from a CA unknown to the responder"
               file={files.unknown_ca_cert}
               onChange={setFile('unknown_ca_cert')}
+              {...savedPickerProps('unknown_ca_cert')}
             />
             <FileField
               label="Trust anchor / intermediate chain"
               hint="PEM, may contain multiple certificates"
               file={files.trust_anchor}
               onChange={setFile('trust_anchor')}
+              {...savedPickerProps('trust_anchor')}
             />
             <FileField
               label="Client TLS certificate"

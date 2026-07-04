@@ -31,8 +31,8 @@ CATEGORY_LABELS = {
     "path_validation": "Certificate path validation tests",
     "ikev2": "IKEv2 tests",
     "federal": "Federal PKI / Federal Bridge tests",
-    "performance": "Performance tests",
-    "security": "Security & error handling tests",
+    "performance": "Performance tests (OCSP)",
+    "security": "Security & error handling tests (OCSP)",
 }
 
 
