@@ -33,7 +33,12 @@ jobs:
         run: pip install -r backend/requirements-dev.txt
 
       - name: Run backend tests
-        run: python -m pytest backend/tests -q
+        # Hard job-level cap plus SIGABRT (via timeout -s ABRT) so a whole-run
+        # or at-exit hang dumps every thread's traceback under faulthandler
+        # instead of silently eating the CI budget. pytest-timeout (configured
+        # in pytest.ini) catches per-test hangs with a thread dump.
+        timeout-minutes: 10
+        run: timeout -s ABRT 300 python -X faulthandler -m pytest backend/tests -q
 
       - uses: actions/setup-node@v4
         with:
