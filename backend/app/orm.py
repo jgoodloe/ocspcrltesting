@@ -92,6 +92,20 @@ class Result(Base):
         return json.loads(self.details_json or "{}")
 
 
+class AppSetting(Base):
+    """Simple key/value store for server-wide settings (JSON payloads)."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(60), primary_key=True)
+    value_json: Mapped[str] = mapped_column(Text, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    @property
+    def value(self) -> Dict[str, Any]:
+        return json.loads(self.value_json or "{}")
+
+
 class Profile(Base):
     __tablename__ = "profiles"
     __table_args__ = (UniqueConstraint("name", name="uq_profiles_name"),)

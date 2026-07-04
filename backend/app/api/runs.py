@@ -21,11 +21,23 @@ from ..certs import (
 from ..db import get_session
 from ..exports import build_csv_export, build_json_export
 from ..jobs import TERMINAL_STATUSES, get_job_manager
-from ..orm import Result, Run, RunEvent
-from ..schemas import LogLine, LogList, ResultList, RunConfig, RunDetail, RunList, RunSummary
+from ..orm import Profile, Result, Run, RunEvent
+from ..schemas import (
+    LogLine,
+    LogList,
+    ProfileOut,
+    ResultList,
+    RunConfig,
+    RunDetail,
+    RunList,
+    RunProfileIn,
+    RunSummary,
+)
 from ..ssrf import BlockedTargetError, NetworkPolicy, validate_url
 from ..storage import RunWorkspace
 from ..settings import get_settings
+from ..test_catalog import validate_selection
+from .catalog import load_global_selection
 from .certs import read_limited_upload
 from .serializers import result_to_schema, run_to_detail, run_to_summary
 
@@ -77,6 +89,18 @@ async def create_run(
     except BlockedTargetError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
+    # Resolve the fine-grained test selection now so the run records exactly
+    # what was applied (the global default may change later).
+    selection = run_config.test_selection
+    resolved_tests: Optional[dict] = None
+    if selection.mode == "custom":
+        error = validate_selection(selection.tests)
+        if error:
+            raise HTTPException(status_code=400, detail=error)
+        resolved_tests = selection.tests
+    elif selection.mode == "global":
+        resolved_tests = await load_global_selection(session)
+
     manager = get_job_manager()
     if await manager.active_run_count() >= settings.max_concurrent_runs:
         raise HTTPException(
@@ -123,6 +147,7 @@ async def create_run(
 
     stored_config = run_config.model_dump()
     stored_config["files"] = file_names
+    stored_config["resolved_test_selection"] = resolved_tests
 
     run = Run(
         id=run_id,
@@ -134,10 +159,12 @@ async def create_run(
     session.add(run)
     await session.commit()
 
+    manifest_config = run_config.model_dump()
+    manifest_config["resolved_test_selection"] = resolved_tests
     workspace.write_job_manifest(
         {
             "run_id": run_id,
-            "config": run_config.model_dump(),
+            "config": manifest_config,
             "files": stored_files,
             "policy": {
                 "allow_private": policy.allow_private,
@@ -264,6 +291,37 @@ async def export_csv(run_id: str, session: AsyncSession = Depends(get_session)) 
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="ocsp-run-{run_id}.csv"'},
     )
+
+
+@router.post("/test-runs/{run_id}/profile", response_model=ProfileOut, status_code=201)
+async def save_run_as_profile(
+    run_id: str, payload: RunProfileIn, session: AsyncSession = Depends(get_session)
+) -> ProfileOut:
+    """Save an existing run's configuration as a reusable profile."""
+    from .profiles import _check_name_free, _to_out
+
+    run = await _get_run_or_404(session, run_id)
+    # The stored run config carries run-only bookkeeping ("files",
+    # "resolved_test_selection"); keep only real RunConfig fields.
+    raw = {k: v for k, v in run.config.items() if k in RunConfig.model_fields}
+    try:
+        config = RunConfig.model_validate(raw)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"Run configuration cannot be saved as a profile: {exc.errors()}"
+        ) from exc
+
+    await _check_name_free(session, payload.name)
+    profile = Profile(
+        name=payload.name,
+        description=payload.description,
+        config_json=json.dumps(config.model_dump(exclude={"profile_id"})),
+    )
+    session.add(profile)
+    await session.commit()
+    await session.refresh(profile)
+    logger.info("saved run %s as profile %r", run_id, payload.name)
+    return _to_out(profile)
 
 
 @router.post("/test-runs/{run_id}/cancel", response_model=RunSummary)

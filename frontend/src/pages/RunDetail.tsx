@@ -16,6 +16,7 @@ import {
   getResults,
   getRun,
   isTerminalStatus,
+  saveRunAsProfile,
   type LogLine,
   type ProgressData,
   type RunDetail,
@@ -45,6 +46,12 @@ export function RunDetailPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState('');
+  const [saveDesc, setSaveDesc] = useState('');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveDone, setSaveDone] = useState<string | null>(null);
+  const [savingProfile, setSavingProfile] = useState(false);
 
   const seenLogSeqs = useRef<Set<number>>(new Set());
 
@@ -143,6 +150,30 @@ export function RunDetailPage() {
     }
   };
 
+  const handleSaveProfile = async () => {
+    if (!id) return;
+    setSaveError(null);
+    if (!saveName.trim()) {
+      setSaveError('Profile name is required.');
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      const created = await saveRunAsProfile(id, {
+        name: saveName.trim(),
+        description: saveDesc.trim() || null,
+      });
+      setSaveOpen(false);
+      setSaveName('');
+      setSaveDesc('');
+      setSaveDone(`Saved profile “${created.name}” from this run's configuration.`);
+    } catch (err) {
+      setSaveError(err instanceof ApiError ? err.detail : 'Could not save profile.');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!id) return;
     setActionError(null);
@@ -204,6 +235,18 @@ export function RunDetailPage() {
               {cancelling ? 'Cancelling…' : 'Cancel run'}
             </button>
           )}
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              setSaveOpen(true);
+              setSaveDone(null);
+              setSaveError(null);
+              setSaveName(run.name || '');
+            }}
+          >
+            Save as profile
+          </button>
           <a className="btn" href={exportJsonUrl(run.id)} download>
             Export JSON
           </a>
@@ -224,6 +267,76 @@ export function RunDetailPage() {
         <div className="form-error" role="alert">
           <span className="err-status">Error</span>
           {actionError}
+        </div>
+      )}
+
+      {saveDone && (
+        <div className="panel notice-ok" role="status" style={{ marginBottom: 14 }}>
+          {saveDone} <Link to="/profiles">View profiles →</Link>
+        </div>
+      )}
+
+      {saveOpen && (
+        <div className="dialog-backdrop" onMouseDown={() => setSaveOpen(false)}>
+          <div
+            className="dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Save run as profile"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h3>Save run as profile</h3>
+            <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+              Stores this run's configuration (URLs, options, categories and test selection) as
+              a reusable profile. Uploaded certificates are not stored.
+            </p>
+            {saveError && (
+              <div className="form-error" role="alert">
+                <span className="err-status">Error</span>
+                {saveError}
+              </div>
+            )}
+            <div className="field">
+              <label className="field-label" htmlFor="save-profile-name">
+                Name<span className="req" aria-hidden="true">*</span>
+              </label>
+              <input
+                id="save-profile-name"
+                className="input"
+                autoFocus
+                required
+                value={saveName}
+                onChange={(e) => setSaveName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleSaveProfile();
+                }}
+              />
+            </div>
+            <div className="field">
+              <label className="field-label" htmlFor="save-profile-desc">
+                Description
+              </label>
+              <input
+                id="save-profile-desc"
+                className="input"
+                value={saveDesc}
+                onChange={(e) => setSaveDesc(e.target.value)}
+              />
+            </div>
+            <div className="dialog-actions">
+              <button type="button" className="btn" onClick={() => setSaveOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void handleSaveProfile()}
+                disabled={savingProfile}
+              >
+                {savingProfile ? 'Saving…' : 'Save profile'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

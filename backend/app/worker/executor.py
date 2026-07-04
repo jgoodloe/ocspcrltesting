@@ -16,7 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional
 
-from ocsp_tester import ocsp_client
+from ocsp_tester import ocsp_client, selection
 from ocsp_tester.models import TestCaseResult, TestStatus
 from ocsp_tester.runner import _load_cert
 from ocsp_tester.tests_crl import run_crl_tests
@@ -30,7 +30,7 @@ from ocsp_tester.tests_security import run_security_tests
 from ocsp_tester.tests_status import run_status_tests
 
 from ..ssrf import BlockedTargetError, NetworkPolicy, validate_url
-from . import netguard
+from . import diagnostics, netguard
 from .analysis import enrich_result
 
 Emit = Callable[[str, Dict[str, Any]], None]
@@ -121,6 +121,32 @@ class RunExecutor:
             self._collect_latencies(payload)
             self.emit("result", {"result": payload})
 
+    def _attach_diagnostics(self, results: List[TestCaseResult], records: List[Dict[str, Any]]) -> None:
+        """Attach recorded HTTP exchanges / commands to the test result whose
+        execution window contains them (tests run sequentially, so start-time
+        containment is unambiguous)."""
+        if not records:
+            return
+        for r in results:
+            end = r.ended_at or datetime.utcnow()
+            matched = [
+                rec for rec in records
+                if rec.get("_started") is not None and r.started_at <= rec["_started"] <= end
+            ]
+            if not matched:
+                continue
+            http = [{k: v for k, v in rec.items() if k != "_started"} for rec in matched if rec.get("kind") == "http"]
+            commands = [
+                {k: v for k, v in rec.items() if k != "_started"} for rec in matched if rec.get("kind") == "command"
+            ]
+            diag: Dict[str, Any] = {}
+            if http:
+                diag["http"] = http[:25]
+            if commands:
+                diag["commands"] = commands[:25]
+            if diag:
+                r.details["diagnostics"] = diag
+
     def _error_result(self, category: str, name: str, message: str) -> TestCaseResult:
         r = TestCaseResult(id=str(uuid.uuid4()), category=category, name=name, status=TestStatus.ERROR, message=message)
         r.end()
@@ -159,6 +185,9 @@ class RunExecutor:
         ocsp_client.RUNTIME.nonce_len = int(cfg.get("nonce_length", 32))
 
         netguard.install(self.policy, self.log)
+        # Record every outbound HTTP exchange and external command for
+        # troubleshooting; layered after netguard so records reflect policy.
+        diagnostics.install(self.log)
 
         ocsp_url = cfg["ocsp_url"]
         self.log("INFO", f"Run {self.run_id} starting against {ocsp_url}")
@@ -185,6 +214,14 @@ class RunExecutor:
         enabled = [k for k in CATEGORY_ORDER if cfg.get("categories", {}).get(k)]
         total = len(enabled)
         self.log("INFO", f"Enabled categories: {', '.join(CATEGORY_LABELS[k] for k in enabled) or 'none'}")
+
+        # Fine-grained selection resolved by the API at submission time:
+        # {category: [test name, ...]}; a missing category runs everything.
+        selection_map = cfg.get("resolved_test_selection")
+        if not isinstance(selection_map, dict):
+            selection_map = None
+        if selection_map:
+            self.log("INFO", "Fine-grained test selection is active for this run")
 
         engine_cfg = self._engine_config()
         crl_urls: List[str] = cfg.get("crl_urls", [])
@@ -256,6 +293,12 @@ class RunExecutor:
                 },
             )
             self.log("INFO", f"=== {label} ===")
+            selected = None
+            if selection_map is not None and key in selection_map:
+                selected = [str(n) for n in selection_map[key]]
+                self.log("INFO", f"{label}: restricted to {len(selected)} selected test(s)")
+            records_before = len(diagnostics.records())
+            selection.set_active(selected)
             try:
                 results = runners[key]()
             except RunCancelled:
@@ -264,6 +307,13 @@ class RunExecutor:
                 self.log("ERROR", f"{label} crashed: {exc}")
                 self.log("DEBUG", traceback.format_exc())
                 results = [self._error_result(CATEGORY_LABELS[key].split(" tests")[0], f"Run {label}", str(exc))]
+            finally:
+                selection.set_active(None)
+            if selected is not None:
+                # Safety net in case an engine module misses a guard.
+                selected_set = set(selected)
+                results = [r for r in results if selection.matches(r.name, selected_set)]
+            self._attach_diagnostics(results, diagnostics.records()[records_before:])
             self._emit_results(results)
             done += 1
             self.emit(
@@ -286,9 +336,10 @@ class RunExecutor:
 
         results: List[TestCaseResult] = []
         for url in crl_urls:
-            r = TestCaseResult(
-                id=str(uuid.uuid4()), category="CRL", name=f"Fetch and parse CRL: {url}", status=TestStatus.ERROR
-            )
+            name = f"Fetch and parse CRL: {url}"
+            if not selection.should_run(name):
+                continue
+            r = TestCaseResult(id=str(uuid.uuid4()), category="CRL", name=name, status=TestStatus.ERROR)
             try:
                 resp = requests.get(url, timeout=self.policy.max_timeout_seconds)
                 resp.raise_for_status()

@@ -8,6 +8,7 @@ import { NewRun } from './pages/NewRun';
 import { Profiles } from './pages/Profiles';
 import { RunDetailPage } from './pages/RunDetail';
 import { RunsHistory } from './pages/RunsHistory';
+import { Settings } from './pages/Settings';
 import './styles.css';
 
 const router = createBrowserRouter(
@@ -21,6 +22,7 @@ const router = createBrowserRouter(
         { path: 'runs/new', element: <NewRun /> },
         { path: 'runs/:id', element: <RunDetailPage /> },
         { path: 'profiles', element: <Profiles /> },
+        { path: 'settings', element: <Settings /> },
       ],
     },
   ],

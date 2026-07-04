@@ -203,7 +203,7 @@ export function NewRun() {
       </div>
 
       {saveDone && (
-        <div className="panel" style={{ marginBottom: 14, color: 'var(--pass)' }}>
+        <div className="panel notice-ok" role="status" style={{ marginBottom: 14 }}>
           {saveDone}
         </div>
       )}

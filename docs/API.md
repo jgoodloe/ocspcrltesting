@@ -115,9 +115,20 @@ Starts a test run. `multipart/form-data`:
     "performance": false,
     "security": true
   },
+  "test_selection": {                 // fine-grained selection inside the enabled categories
+    "mode": "all",                    // "all" | "global" | "custom"
+    "tests": {}                       // custom mode: {category: [test name, ...]};
+                                      // a category absent from the map runs all of its tests
+  },
   "profile_id": null                  // optional provenance marker
 }
 ```
+
+With `mode: "global"` the server-wide selection (see
+`/api/settings/test-selection`) is resolved when the run is created; with
+`mode: "custom"` the `tests` map is used. The applied selection is recorded
+on the run as `config.resolved_test_selection` (`null` = all tests ran).
+Test names must match the catalog from `GET /api/test-catalog`.
 
 Response `201`: a **RunSummary** (see below) with status `queued` or `running`.
 
@@ -176,6 +187,36 @@ name/message). Response:
 }
 ```
 
+`details.diagnostics` (when present) records what the test actually did,
+for troubleshooting:
+
+```json
+{
+  "http": [
+    {
+      "method": "POST", "url": "http://ocsp.example.com/",
+      "status_code": 200, "reason": "OK", "duration_ms": 45,
+      "request_bytes": 85, "request_body_b64": "...",       // ≤4 KiB bodies
+      "response_bytes": 1712, "response_body_b64": "...",
+      "response_content_type": "application/ocsp-response",
+      "curl": "…reproduction command…",
+      "started_at": "...", "ended_at": "..."
+    }
+  ],
+  "commands": [
+    {
+      "command": "openssl ocsp -issuer ... -url ... -resp_text -noverify",
+      "returncode": 0, "duration_ms": 120,
+      "stdout_excerpt": "...", "stderr_excerpt": "...",
+      "started_at": "...", "ended_at": "..."
+    }
+  ]
+}
+```
+
+Each recorded exchange/command is also emitted as a `DEBUG` log line
+(`[HTTP] …` / `[CMD] …`) in the run log.
+
 ### `GET /api/test-runs/{run_id}/logs?after_seq=0&limit=1000`
 Persisted log lines (also replayed on stream reconnect):
 
@@ -189,6 +230,17 @@ config (sanitized), results, and log lines.
 
 ### `GET /api/test-runs/{run_id}/export/csv`
 CSV of results: `id,category,name,status,message,duration_ms,started_at,ended_at,details`.
+
+### `POST /api/test-runs/{run_id}/profile`
+Saves the run's configuration as a reusable profile (works for finished
+runs; uploaded certificates are not stored). Body:
+
+```json
+{ "name": "Nightly lab profile", "description": "optional" }
+```
+
+Response `201`: the created **Profile**. `409` when the name is taken,
+`404` unknown run.
 
 ### `POST /api/test-runs/{run_id}/cancel`
 Cancels a queued/running run. Response: updated RunSummary. `409` if already finished.
@@ -251,3 +303,45 @@ Response `201` Profile:
 ### `DELETE /api/profiles/{profile_id}` — `204`.
 
 `409` on duplicate profile name.
+
+---
+
+## Test catalog and global test selection
+
+### `GET /api/test-catalog`
+The individual tests each category can run — the vocabulary for
+`test_selection` in run configs and the global selection setting:
+
+```json
+{
+  "categories": [
+    {
+      "key": "protocol",
+      "label": "OCSP protocol tests",
+      "tests": [
+        { "name": "HTTP GET transport",
+          "description": "Responder accepts RFC 6960 base64 GET requests",
+          "dynamic": false }
+      ]
+    }
+  ]
+}
+```
+
+`dynamic: true` marks tests whose name is a stable prefix and which may emit
+one result per input (e.g. `Fetch and parse CRL: <url>`).
+
+### `GET /api/settings/test-selection`
+The server-wide default selection applied to runs whose config uses
+`test_selection.mode == "global"`:
+
+```json
+{ "tests": { "protocol": ["HTTP GET transport"] }, "updated_at": "..." }
+```
+
+`tests: null` means the global selection runs everything.
+
+### `PUT /api/settings/test-selection`
+Body `{ "tests": {category: [test name, ...]} | null }`. Category keys and
+test names are validated against the catalog (`400` on unknown entries).
+Response: the stored selection.
