@@ -602,7 +602,9 @@ export interface Workspace {
   run_visibility: RunVisibility;
   allow_private_targets: boolean;
   max_concurrent_runs: number;
-  oidc_group: string | null;
+  oidc_group_admin: string | null;
+  oidc_group: string | null; // member tier
+  oidc_group_viewer: string | null;
   role: Role | null;
   created_at: string;
 }
@@ -625,6 +627,7 @@ export interface Member {
   email: string | null;
   display_name: string | null;
   provider: string | null;
+  source?: string | null; // "manual" | "oidc"
 }
 
 export interface ApiToken {
@@ -679,7 +682,9 @@ export interface WorkspaceUpdate {
   run_visibility?: RunVisibility;
   allow_private_targets?: boolean;
   max_concurrent_runs?: number;
+  oidc_group_admin?: string | null;
   oidc_group?: string | null;
+  oidc_group_viewer?: string | null;
 }
 
 export function updateWorkspace(id: number, patch: WorkspaceUpdate): Promise<Workspace> {

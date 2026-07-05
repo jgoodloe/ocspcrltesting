@@ -71,7 +71,12 @@ class Workspace(Base):
     # ceilings in settings (allow_private_targets, max_concurrent_runs).
     allow_private_targets: Mapped[bool] = mapped_column(Boolean, default=False)
     max_concurrent_runs: Mapped[int] = mapped_column(Integer, default=2)
+    # OIDC group -> role mapping. A user whose IdP groups contain one of these
+    # is auto-granted the corresponding role on login (highest wins). Any tier
+    # may be left null. ``oidc_group`` is the member tier (kept for back-compat).
+    oidc_group_admin: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     oidc_group: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    oidc_group_viewer: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -85,6 +90,10 @@ class WorkspaceMember(Base):
     workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     role: Mapped[str] = mapped_column(String(10), default="member")  # admin | member | viewer
+    # "manual" (set by an admin, authoritative) or "oidc" (managed by group
+    # sync). Group sync only ever creates/updates/removes its own "oidc" rows,
+    # so a role an admin set by hand is never overwritten or revoked.
+    source: Mapped[str] = mapped_column(String(10), default="manual")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

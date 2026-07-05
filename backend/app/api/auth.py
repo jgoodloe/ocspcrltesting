@@ -263,7 +263,9 @@ def _workspace_out(w: Workspace, role: Optional[str]) -> WorkspaceOut:
         run_visibility=w.run_visibility,  # type: ignore[arg-type]
         allow_private_targets=bool(w.allow_private_targets),
         max_concurrent_runs=w.max_concurrent_runs,
+        oidc_group_admin=w.oidc_group_admin,
         oidc_group=w.oidc_group,
+        oidc_group_viewer=w.oidc_group_viewer,
         role=role,  # type: ignore[arg-type]
         created_at=w.created_at,
     )

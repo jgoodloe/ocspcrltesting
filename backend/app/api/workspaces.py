@@ -109,8 +109,12 @@ async def update_workspace(
                 detail=f"max_concurrent_runs cannot exceed the deployment ceiling of {settings.max_concurrent_runs}",
             )
         ws.max_concurrent_runs = payload.max_concurrent_runs
+    if payload.oidc_group_admin is not None:
+        ws.oidc_group_admin = payload.oidc_group_admin or None
     if payload.oidc_group is not None:
         ws.oidc_group = payload.oidc_group or None
+    if payload.oidc_group_viewer is not None:
+        ws.oidc_group_viewer = payload.oidc_group_viewer or None
     await audit.record(
         session, "workspace.update", user=ctx.principal.user, workspace_id=ws.id,
         target=ws.name, detail=payload.model_dump(exclude_none=True), commit=False,
@@ -153,7 +157,8 @@ async def list_members(
     return MemberList(
         items=[
             MemberOut(
-                user_id=u.id, role=m.role, email=u.email, display_name=u.display_name, provider=u.provider
+                user_id=u.id, role=m.role, email=u.email, display_name=u.display_name,
+                provider=u.provider, source=m.source or "manual",
             )
             for (m, u) in rows
         ]
@@ -179,7 +184,13 @@ async def add_member(
     if await get_membership(session, user.id, ctx.workspace.id) is not None:
         raise HTTPException(status_code=409, detail="User is already a member")
     Role.parse(payload.role)  # validate
-    session.add(WorkspaceMember(workspace_id=ctx.workspace.id, user_id=user.id, role=payload.role))
+    # Explicitly manual: an admin added this person, so OIDC group sync must
+    # never revoke or override it.
+    session.add(
+        WorkspaceMember(
+            workspace_id=ctx.workspace.id, user_id=user.id, role=payload.role, source="manual"
+        )
+    )
     await audit.record(
         session, "member.add", user=ctx.principal.user, workspace_id=ctx.workspace.id,
         target=user.email or user.subject, detail={"role": payload.role}, commit=False,
@@ -200,6 +211,9 @@ async def change_member_role(
         raise HTTPException(status_code=404, detail="Not a member")
     await _guard_last_admin(session, ctx.workspace.id, user_id, new_role=payload.role)
     member.role = payload.role
+    # A hand-set role pins the membership: from now on it's authoritative and
+    # OIDC group sync leaves it alone.
+    member.source = "manual"
     user = await session.get(User, user_id)
     await audit.record(
         session, "member.role", user=ctx.principal.user, workspace_id=ctx.workspace.id,

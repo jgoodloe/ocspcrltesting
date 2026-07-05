@@ -347,7 +347,9 @@ class WorkspaceOut(BaseModel):
     run_visibility: RunVisibility
     allow_private_targets: bool
     max_concurrent_runs: int
-    oidc_group: Optional[str] = None
+    oidc_group_admin: Optional[str] = None
+    oidc_group: Optional[str] = None  # member tier
+    oidc_group_viewer: Optional[str] = None
     role: Optional[Role] = None  # the requesting user's role in this workspace
     created_at: Optional[datetime] = None
 
@@ -370,7 +372,9 @@ class WorkspaceUpdateIn(BaseModel):
     run_visibility: Optional[RunVisibility] = None
     allow_private_targets: Optional[bool] = None
     max_concurrent_runs: Optional[int] = Field(default=None, ge=1, le=64)
+    oidc_group_admin: Optional[str] = Field(default=None, max_length=200)
     oidc_group: Optional[str] = Field(default=None, max_length=200)
+    oidc_group_viewer: Optional[str] = Field(default=None, max_length=200)
 
 
 class MemberOut(BaseModel):
@@ -379,6 +383,7 @@ class MemberOut(BaseModel):
     email: Optional[str] = None
     display_name: Optional[str] = None
     provider: Optional[str] = None
+    source: Optional[str] = None  # "manual" | "oidc" (how the membership was granted)
 
 
 class MemberList(BaseModel):

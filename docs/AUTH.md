@@ -16,7 +16,7 @@ single-user "open" mode: an anonymous administrator and a single shared
 - **Workspace** — owns runs/profiles/CA certs. Two kinds:
   - `personal` — created automatically for each user on first login.
   - `shared` — created by users; members are managed explicitly or synced from
-    an OIDC group.
+    OIDC groups (see [Group → role mapping](#group--role-mapping)).
 - **Role** — per workspace, one of `viewer` < `member` < `admin`:
   - `viewer` — read runs, profiles, certificates.
   - `member` — everything a viewer can do, plus start/cancel runs and manage
@@ -66,12 +66,44 @@ e.g. `https://ocsp.example.com/api/auth/oidc/callback`. Set
 `OCSPWEB_PUBLIC_BASE_URL` when the app can't infer its external URL from the
 request (behind some proxies).
 
-On first login an OIDC user is provisioned with a personal workspace. If a
-shared workspace has an `oidc_group` matching one of the user's groups, they are
-added to it as a `member` automatically.
+On first login an OIDC user is provisioned with a personal workspace, then their
+group-driven memberships are reconciled (below).
 
 To force SSO-only, set `OCSPWEB_LOCAL_LOGIN_ENABLED=false` (the break-glass
 admin still works for recovery).
+
+### Group → role mapping
+
+Each shared workspace can map IdP groups to roles. On the **Workspaces** page a
+workspace admin sets, per workspace, up to three group names:
+
+- **OIDC group → admin**
+- **OIDC group → member**
+- **OIDC group → viewer**
+
+The group name is matched **exactly** (case-sensitive) against the values in the
+user's group claim (`OCSPWEB_OIDC_GROUP_CLAIM`, default `groups`; in authentik
+the default `profile` scope already emits group **names**). Any tier may be left
+blank.
+
+The sync is **authoritative** for the memberships it creates, and runs on **every
+login**:
+
+- If the user is in a mapped group, they get that role; if they match more than
+  one tier, the **highest** wins (admin > member > viewer).
+- If the user is no longer in any mapped group for a workspace, their
+  group-managed membership there is **removed** (a downgrade works the same way).
+- A membership an **admin set by hand** is never touched — not upgraded,
+  downgraded, or revoked. Editing a group-managed member's role in the Members
+  table **pins** it (it becomes manual and sync stops managing it).
+
+Group mapping only grants per-workspace roles; it never confers global admin.
+There is no `groups`-based global admin — promote those accounts explicitly.
+
+Example: create authentik groups `ocsp-admins` and `ocsp-testers`, put them in
+the XTec workspace's *admin* and *member* boxes, and add users to the groups in
+authentik. They land in XTec with the right role on their next login; remove
+someone from `ocsp-testers` and they lose XTec access next time they sign in.
 
 ## API tokens
 

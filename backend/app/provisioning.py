@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import List, Optional
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .orm import CACertificate, Profile, Run, User, Workspace, WorkspaceMember, utcnow
@@ -76,14 +76,42 @@ async def get_or_create_oidc_user(
     return user
 
 
+def _entitled_role(ws: Workspace, groups: set[str]) -> Optional[str]:
+    """The highest workspace role the user's IdP groups grant, or None."""
+    if ws.oidc_group_admin and ws.oidc_group_admin in groups:
+        return "admin"
+    if ws.oidc_group and ws.oidc_group in groups:
+        return "member"
+    if ws.oidc_group_viewer and ws.oidc_group_viewer in groups:
+        return "viewer"
+    return None
+
+
 async def sync_oidc_group_memberships(session: AsyncSession, user: User, groups: List[str]) -> None:
-    """Add the user to shared workspaces whose ``oidc_group`` matches one of the
-    IdP-provided groups. Manual memberships are left intact."""
-    if not groups:
-        return
+    """Reconcile the user's group-driven workspace memberships from the IdP.
+
+    Authoritative for the memberships it owns (``source == "oidc"``): a matching
+    group grants/updates the mapped role, and losing every matching group in a
+    workspace revokes that membership. Memberships an admin set by hand
+    (``source == "manual"``) are never touched — neither upgraded, downgraded,
+    nor removed — so manual grants always win.
+    """
+    group_set = {g for g in groups if g}
+    # Every workspace that maps at least one group to a role is a candidate,
+    # even when the user matches none of them (that's how revocation happens).
     workspaces = (
-        await session.execute(select(Workspace).where(Workspace.oidc_group.in_(groups)))
+        await session.execute(
+            select(Workspace).where(
+                or_(
+                    Workspace.oidc_group_admin.is_not(None),
+                    Workspace.oidc_group.is_not(None),
+                    Workspace.oidc_group_viewer.is_not(None),
+                )
+            )
+        )
     ).scalars().all()
+
+    changed = False
     for ws in workspaces:
         member = (
             await session.execute(
@@ -92,9 +120,29 @@ async def sync_oidc_group_memberships(session: AsyncSession, user: User, groups:
                 )
             )
         ).scalar_one_or_none()
-        if member is None:
-            session.add(WorkspaceMember(workspace_id=ws.id, user_id=user.id, role="member"))
-    await session.commit()
+        # Respect anything an admin set by hand; only manage our own rows.
+        if member is not None and (member.source or "manual") != "oidc":
+            continue
+
+        role = _entitled_role(ws, group_set)
+        if role is not None:
+            if member is None:
+                session.add(
+                    WorkspaceMember(
+                        workspace_id=ws.id, user_id=user.id, role=role, source="oidc"
+                    )
+                )
+                changed = True
+            elif member.role != role:
+                member.role = role
+                changed = True
+        elif member is not None:
+            # No matching group any more -> drop the group-managed membership.
+            await session.delete(member)
+            changed = True
+
+    if changed:
+        await session.commit()
 
 
 async def ensure_bootstrap_admin(session: AsyncSession, settings: Settings) -> None:
@@ -171,6 +219,19 @@ async def backfill_default_workspace(session: AsyncSession, workspace_id: int) -
     return touched
 
 
+async def backfill_member_source(session: AsyncSession) -> None:
+    """Mark memberships that predate the ``source`` column as ``manual`` so the
+    authoritative OIDC group sync never mistakes them for group-managed rows and
+    revokes them. Idempotent."""
+    result = await session.execute(
+        update(WorkspaceMember)
+        .where(WorkspaceMember.source.is_(None))
+        .values(source="manual")
+    )
+    if result.rowcount:
+        await session.commit()
+
+
 async def run_startup_provisioning(session: AsyncSession, settings: Settings) -> None:
     """Idempotent boot-time setup: break-glass admin, default workspace, and a
     one-time backfill of legacy data into it."""
@@ -178,3 +239,4 @@ async def run_startup_provisioning(session: AsyncSession, settings: Settings) ->
     default_ws = await ensure_default_workspace(session)
     await session.commit()
     await backfill_default_workspace(session, default_ws.id)
+    await backfill_member_source(session)

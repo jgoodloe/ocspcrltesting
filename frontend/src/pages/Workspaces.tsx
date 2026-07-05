@@ -120,7 +120,9 @@ function WorkspaceSettings({ canAdmin }: { canAdmin: boolean }) {
   const [visibility, setVisibility] = useState<RunVisibility>(ws.run_visibility);
   const [allowPrivate, setAllowPrivate] = useState(ws.allow_private_targets);
   const [maxRuns, setMaxRuns] = useState(ws.max_concurrent_runs);
+  const [oidcAdmin, setOidcAdmin] = useState(ws.oidc_group_admin ?? '');
   const [oidcGroup, setOidcGroup] = useState(ws.oidc_group ?? '');
+  const [oidcViewer, setOidcViewer] = useState(ws.oidc_group_viewer ?? '');
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -134,7 +136,9 @@ function WorkspaceSettings({ canAdmin }: { canAdmin: boolean }) {
         run_visibility: visibility,
         allow_private_targets: allowPrivate,
         max_concurrent_runs: maxRuns,
+        oidc_group_admin: oidcAdmin || null,
         oidc_group: oidcGroup || null,
+        oidc_group_viewer: oidcViewer || null,
       });
       setSaved(true);
       await refresh();
@@ -195,8 +199,21 @@ function WorkspaceSettings({ canAdmin }: { canAdmin: boolean }) {
             <p className="field-hint">Capped by the deployment ceiling.</p>
           </div>
           <div className="field">
+            <label className="field-label" htmlFor="ws-group-admin">
+              OIDC group → admin
+            </label>
+            <input
+              id="ws-group-admin"
+              className="input"
+              value={oidcAdmin}
+              onChange={(e) => setOidcAdmin(e.target.value)}
+              placeholder="optional"
+              disabled={!canAdmin}
+            />
+          </div>
+          <div className="field">
             <label className="field-label" htmlFor="ws-group">
-              OIDC group (auto-membership)
+              OIDC group → member
             </label>
             <input
               id="ws-group"
@@ -206,6 +223,23 @@ function WorkspaceSettings({ canAdmin }: { canAdmin: boolean }) {
               placeholder="optional"
               disabled={!canAdmin}
             />
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="ws-group-viewer">
+              OIDC group → viewer
+            </label>
+            <input
+              id="ws-group-viewer"
+              className="input"
+              value={oidcViewer}
+              onChange={(e) => setOidcViewer(e.target.value)}
+              placeholder="optional"
+              disabled={!canAdmin}
+            />
+            <p className="field-hint">
+              Members of these IdP groups get the role on login; highest wins.
+              Roles you set by hand below are preserved.
+            </p>
           </div>
           <label className="checkbox-row">
             <input
@@ -321,6 +355,11 @@ function MembersPanel({ canAdmin }: { canAdmin: boolean }) {
                     </select>
                   ) : (
                     m.role
+                  )}
+                  {m.source === 'oidc' && (
+                    <span className="muted" style={{ marginLeft: '0.4rem', fontSize: '0.85em' }}>
+                      via group
+                    </span>
                   )}
                 </td>
                 {canAdmin && (
