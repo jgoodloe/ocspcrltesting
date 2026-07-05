@@ -89,6 +89,28 @@ def test_cancel_hanging_run(app_client, cert_fixtures):
     assert final["status"] == "cancelled"
 
 
+def test_duplicate_result_id_across_runs(app_client, cert_fixtures):
+    """Two runs that emit a result with the same id must both complete and
+    keep all their results. Result.id is a global primary key; path validation
+    once emitted deterministic ids that collided with a prior run and aborted
+    the whole run (dropping every later category). The supervisor now assigns a
+    fresh id on collision instead of crashing."""
+    first = _create_run(app_client, cert_fixtures, name="dupid")
+    first_id = first.json()["id"]
+    final = _wait_terminal(app_client, first_id)
+    assert final["status"] == "completed"
+    assert final["totals"]["total"] == 2
+
+    second = _create_run(app_client, cert_fixtures, name="dupid")
+    second_id = second.json()["id"]
+    final2 = _wait_terminal(app_client, second_id)
+    # Without the fix, the colliding "fixed-result-id" aborts this run.
+    assert final2["status"] == "completed", final2
+    assert final2["totals"]["total"] == 2
+    results = app_client.get(f"/api/test-runs/{second_id}/results").json()
+    assert results["total"] == 2
+
+
 def test_teardown_with_live_worker_does_not_hang(app_client, cert_fixtures):
     """Start a long-running worker and let the client fixture tear down while
     it is still alive. App shutdown must kill + reap the worker and drain its

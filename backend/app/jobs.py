@@ -16,6 +16,7 @@ import logging
 import os
 import signal
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
@@ -277,7 +278,12 @@ class JobManager:
     async def _handle_event(self, run_id: str, etype: str, data: Dict[str, Any]) -> None:
         if etype == "result":
             result = data.get("result", {})
-            await self._persist_result(run_id, result)
+            # A single malformed/duplicate result must never abort the run and
+            # drop every later category. Persistence is best-effort and isolated.
+            try:
+                await self._persist_result(run_id, result)
+            except Exception:
+                logger.exception("run %s: failed to persist result %r", run_id, result.get("id"))
             await self._append_event(run_id, "result", result)
         elif etype == "progress":
             await self._update_run(run_id, current_activity=data.get("current_activity"))
@@ -307,9 +313,17 @@ class JobManager:
             run = await session.get(Run, run_id)
             if run is None:
                 return
+            # Result.id is a global primary key. Guarantee it is unique even if
+            # an engine emits a non-unique id (path validation used deterministic
+            # ids that collided with prior runs and aborted the whole run). The
+            # result dict is mutated so the streamed event uses the same id.
+            result_id = str(result.get("id") or uuid.uuid4())
+            if await session.get(Result, result_id) is not None:
+                result_id = str(uuid.uuid4())
+            result["id"] = result_id
             session.add(
                 Result(
-                    id=result.get("id"),
+                    id=result_id,
                     run_id=run_id,
                     category=result.get("category", ""),
                     name=result.get("name", ""),

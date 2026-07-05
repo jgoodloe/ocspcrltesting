@@ -36,10 +36,14 @@ def main() -> int:
     if behavior == "hang":
         time.sleep(300)
 
+    # "dupid" reuses a fixed result id to exercise the supervisor's global
+    # primary-key de-duplication (path validation once emitted deterministic
+    # ids that collided across runs and aborted the whole run).
+    first_id = "fixed-result-id" if behavior == "dupid" else str(uuid.uuid4())
     emit(
         type="result",
         result={
-            "id": str(uuid.uuid4()),
+            "id": first_id,
             "category": "Protocol",
             "name": "HTTP GET transport",
             "status": "PASS",

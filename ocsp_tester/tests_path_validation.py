@@ -147,7 +147,7 @@ class PathValidationTestSuite:
             
                 if result:
                     self.test_results.append(TestCaseResult(
-                        id=f"path_validation_{test_id}",
+                        id=str(uuid.uuid4()),
                         category="Path Validation - Foundational",
                         name=test_name,
                         status=TestStatus.PASS,
@@ -174,7 +174,7 @@ class PathValidationTestSuite:
                     ))
                 else:
                     self.test_results.append(TestCaseResult(
-                        id=f"path_validation_{test_id}",
+                        id=str(uuid.uuid4()),
                         category="Path Validation - Foundational",
                         name=test_name,
                         status=TestStatus.FAIL,
@@ -212,7 +212,7 @@ class PathValidationTestSuite:
                 
             except Exception as e:
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Foundational",
                     name=test_name,
                     status=TestStatus.ERROR,
@@ -244,7 +244,7 @@ class PathValidationTestSuite:
                 status = TestStatus.FAIL if result else TestStatus.PASS
             
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Foundational",
                     name=test_name,
                     status=status,
@@ -281,7 +281,7 @@ class PathValidationTestSuite:
             
             except Exception as e:
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Foundational",
                     name=test_name,
                     status=TestStatus.ERROR,
@@ -312,7 +312,7 @@ class PathValidationTestSuite:
                 status = TestStatus.FAIL if result else TestStatus.PASS
             
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Foundational",
                     name=test_name,
                     status=status,
@@ -344,7 +344,7 @@ class PathValidationTestSuite:
             
             except Exception as e:
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Foundational",
                     name=test_name,
                     status=TestStatus.ERROR,
@@ -375,7 +375,7 @@ class PathValidationTestSuite:
                 status = TestStatus.FAIL if result else TestStatus.PASS
             
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Foundational",
                     name=test_name,
                     status=status,
@@ -407,7 +407,7 @@ class PathValidationTestSuite:
             
             except Exception as e:
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Foundational",
                     name=test_name,
                     status=TestStatus.ERROR,
@@ -440,7 +440,7 @@ class PathValidationTestSuite:
                 result = self._test_expired_ee_certificate(test_inputs)
             
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Validity Period",
                     name=test_name,
                     status=TestStatus.FAIL if result else TestStatus.PASS,
@@ -476,7 +476,7 @@ class PathValidationTestSuite:
             
             except Exception as e:
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Validity Period",
                     name=test_name,
                     status=TestStatus.ERROR,
@@ -506,7 +506,7 @@ class PathValidationTestSuite:
                 result = self._test_expired_crl(test_inputs)
             
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Validity Period",
                     name=test_name,
                     status=TestStatus.FAIL if result else TestStatus.PASS,
@@ -521,7 +521,7 @@ class PathValidationTestSuite:
             
             except Exception as e:
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Validity Period",
                     name=test_name,
                     status=TestStatus.ERROR,
@@ -541,7 +541,7 @@ class PathValidationTestSuite:
                 result = self._test_revoked_ee_crl(test_inputs)
             
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Revocation Status",
                     name=test_name,
                     status=TestStatus.FAIL if result else TestStatus.PASS,
@@ -556,7 +556,7 @@ class PathValidationTestSuite:
             
             except Exception as e:
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Revocation Status",
                     name=test_name,
                     status=TestStatus.ERROR,
@@ -593,7 +593,7 @@ class PathValidationTestSuite:
                 result = self._test_revoked_ee_ocsp(test_inputs)
             
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Revocation Status",
                     name=test_name,
                     status=TestStatus.FAIL if result else TestStatus.PASS,
@@ -608,7 +608,7 @@ class PathValidationTestSuite:
             
             except Exception as e:
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Revocation Status",
                     name=test_name,
                     status=TestStatus.ERROR,
@@ -648,7 +648,7 @@ class PathValidationTestSuite:
                 result = self._test_basic_constraints_violation(test_inputs)
             
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Constraints & Extensions",
                     name=test_name,
                     status=TestStatus.FAIL if result else TestStatus.PASS,
@@ -663,7 +663,7 @@ class PathValidationTestSuite:
             
             except Exception as e:
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Constraints & Extensions",
                     name=test_name,
                     status=TestStatus.ERROR,
@@ -703,7 +703,7 @@ class PathValidationTestSuite:
                 path_length_details = getattr(self, 'path_length_details', {})
             
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Constraints & Extensions",
                     name=test_name,
                     status=TestStatus.FAIL if result else TestStatus.PASS,
@@ -719,7 +719,7 @@ class PathValidationTestSuite:
             
             except Exception as e:
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Constraints & Extensions",
                     name=test_name,
                     status=TestStatus.ERROR,
@@ -742,7 +742,7 @@ class PathValidationTestSuite:
                 policy_mapping_details = getattr(self, 'policy_mapping_details', {})
             
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Federal Bridge PKI",
                     name=test_name,
                     status=TestStatus.PASS if result else TestStatus.FAIL,
@@ -758,7 +758,7 @@ class PathValidationTestSuite:
             
             except Exception as e:
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Federal Bridge PKI",
                     name=test_name,
                     status=TestStatus.ERROR,
@@ -795,7 +795,7 @@ class PathValidationTestSuite:
                 result = self._test_explicit_policy_violation(test_inputs)
             
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Federal Bridge PKI",
                     name=test_name,
                     status=TestStatus.FAIL if result else TestStatus.PASS,
@@ -810,7 +810,7 @@ class PathValidationTestSuite:
             
             except Exception as e:
                 self.test_results.append(TestCaseResult(
-                    id=f"path_validation_{test_id}",
+                    id=str(uuid.uuid4()),
                     category="Path Validation - Federal Bridge PKI",
                     name=test_name,
                     status=TestStatus.ERROR,
