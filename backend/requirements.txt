@@ -15,3 +15,15 @@ python-multipart>=0.0.9,<1.0.0
 SQLAlchemy>=2.0.30,<3.0.0
 aiosqlite>=0.20.0,<1.0.0
 aiofiles>=23.2.0,<25.0.0
+alembic>=1.13.0,<2.0.0
+# PostgreSQL drivers (the recommended default engine for multi-user):
+# asyncpg for the app's async engine, psycopg2 for synchronous Alembic runs.
+asyncpg>=0.29.0,<1.0.0
+psycopg2-binary>=2.9.9,<3.0.0
+
+# Multi-user auth: OIDC (authentik), local password hashing, signed sessions.
+# Starlette's SessionMiddleware (used by the OIDC flow) requires itsdangerous.
+authlib>=1.3.0,<2.0.0
+httpx>=0.27.0,<1.0.0
+passlib[argon2]>=1.7.4,<2.0.0
+itsdangerous>=2.1.0,<3.0.0

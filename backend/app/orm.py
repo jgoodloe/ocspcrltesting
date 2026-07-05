@@ -10,7 +10,16 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -22,10 +31,102 @@ class Base(DeclarativeBase):
     pass
 
 
+# ---------------------------------------------------------------------------
+# Multi-user model: users, workspaces, memberships, API tokens, audit log.
+# Every run / profile / saved certificate belongs to a workspace; users are
+# members of workspaces with a role.
+# ---------------------------------------------------------------------------
+
+
+class User(Base):
+    __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("provider", "subject", name="uq_users_provider_subject"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    provider: Mapped[str] = mapped_column(String(10))  # "oidc" | "local"
+    # OIDC "sub" claim (stable) or the local username; unique within a provider.
+    subject: Mapped[str] = mapped_column(String(255))
+    email: Mapped[Optional[str]] = mapped_column(String(320), nullable=True)
+    display_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    password_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # local only
+    is_global_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Workspace(Base):
+    __tablename__ = "workspaces"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(10), default="shared")  # "personal" | "shared"
+    owner_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    run_visibility: Mapped[str] = mapped_column(String(10), default="all")  # "all" | "own"
+    # Per-workspace network policy + concurrency, capped by the deployment
+    # ceilings in settings (allow_private_targets, max_concurrent_runs).
+    allow_private_targets: Mapped[bool] = mapped_column(Boolean, default=False)
+    max_concurrent_runs: Mapped[int] = mapped_column(Integer, default=2)
+    oidc_group: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WorkspaceMember(Base):
+    __tablename__ = "workspace_members"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "user_id", name="uq_ws_member"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String(10), default="member")  # admin | member | viewer
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ApiToken(Base):
+    __tablename__ = "api_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(String(200))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # sha256 hex
+    role_ceiling: Mapped[str] = mapped_column(String(10), default="viewer")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor: Mapped[Optional[str]] = mapped_column(String(320), nullable=True)  # display copy
+    event: Mapped[str] = mapped_column(String(60), index=True)
+    workspace_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    target: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
 class Run(Base):
     __tablename__ = "runs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     ocsp_url: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="queued", index=True)
@@ -111,9 +212,19 @@ class CACertificate(Base):
     user can reference in a run instead of re-uploading files."""
 
     __tablename__ = "ca_certificates"
-    __table_args__ = (UniqueConstraint("fingerprint_sha256", name="uq_ca_certificates_fingerprint"),)
+    # Fingerprint is unique within a workspace (the same CA may be saved in
+    # multiple workspaces).
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "fingerprint_sha256", name="uq_ca_certificates_ws_fingerprint"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String(200))
     pem: Mapped[str] = mapped_column(Text)
     subject: Mapped[str] = mapped_column(Text)
@@ -130,9 +241,16 @@ class CACertificate(Base):
 
 class Profile(Base):
     __tablename__ = "profiles"
-    __table_args__ = (UniqueConstraint("name", name="uq_profiles_name"),)
+    # Profile names are unique within a workspace.
+    __table_args__ = (UniqueConstraint("workspace_id", "name", name="uq_profiles_ws_name"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String(120))
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     config_json: Mapped[str] = mapped_column(Text, default="{}")

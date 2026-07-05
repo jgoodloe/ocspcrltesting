@@ -17,8 +17,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from ..auth import require_auth, websocket_authorized
-from ..db import session_factory
+from ..authz import Principal, authorize_run_view, current_principal, principal_from_websocket
+from ..db import get_session, session_factory
 from ..jobs import TERMINAL_STATUSES, get_job_manager
 from ..orm import Run, RunEvent
 
@@ -44,6 +44,11 @@ async def _run_status(run_id: str) -> Optional[str]:
     async with session_factory()() as session:
         run = await session.get(Run, run_id)
         return run.status if run else None
+
+
+async def _load_run(run_id: str) -> Optional[Run]:
+    async with session_factory()() as session:
+        return await session.get(Run, run_id)
 
 
 def _wire_event(run_id: str, event: RunEvent) -> dict:
@@ -74,12 +79,18 @@ async def _event_stream(run_id: str, after_seq: int) -> AsyncIterator[dict]:
 
 @router.websocket("/test-runs/{run_id}/stream")
 async def stream_ws(websocket: WebSocket, run_id: str, after_seq: int = Query(default=0, ge=0)) -> None:
-    if not await websocket_authorized(websocket):
-        await websocket.close(code=1008, reason="Authentication required")
-        return
-    if await _run_status(run_id) is None:
-        await websocket.close(code=4404, reason="Test run not found")
-        return
+    async with session_factory()() as session:
+        principal = await principal_from_websocket(websocket, session)
+        if principal is None:
+            await websocket.close(code=1008, reason="Authentication required")
+            return
+        run = await session.get(Run, run_id)
+        if run is None:
+            await websocket.close(code=4404, reason="Test run not found")
+            return
+        if not await authorize_run_view(session, principal, run):
+            await websocket.close(code=4404, reason="Test run not found")
+            return
     await websocket.accept()
     try:
         async for event in _event_stream(run_id, after_seq):
@@ -95,11 +106,16 @@ async def stream_ws(websocket: WebSocket, run_id: str, after_seq: int = Query(de
             pass
 
 
-@router.get("/test-runs/{run_id}/stream/sse", dependencies=[Depends(require_auth)])
+@router.get("/test-runs/{run_id}/stream/sse")
 async def stream_sse(
-    request: Request, run_id: str, after_seq: int = Query(default=0, ge=0)
+    request: Request,
+    run_id: str,
+    after_seq: int = Query(default=0, ge=0),
+    principal: Principal = Depends(current_principal),
+    session=Depends(get_session),
 ) -> StreamingResponse:
-    if await _run_status(run_id) is None:
+    run = await session.get(Run, run_id)
+    if run is None or not await authorize_run_view(session, principal, run):
         raise HTTPException(status_code=404, detail="Test run not found")
 
     last_event_id = request.headers.get("Last-Event-ID")

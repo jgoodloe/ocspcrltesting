@@ -51,6 +51,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.runs_dir.mkdir(parents=True, exist_ok=True)
     await init_db()
+    # Boot-time provisioning: break-glass admin, default workspace, and a
+    # one-time backfill of legacy (pre-multi-user) data into it.
+    from .authz import auth_active
+    from .db import session_factory
+    from .provisioning import run_startup_provisioning
+
+    async with session_factory()() as session:
+        await run_startup_provisioning(session, settings)
     manager = get_job_manager()
     await manager.mark_orphans_failed()
     retention_task = asyncio.create_task(_retention_loop())
@@ -59,7 +67,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         APP_NAME,
         __version__,
         settings.base_path or "/",
-        "on" if settings.auth_enabled else "off",
+        "on" if auth_active() else "off",
         "allowed" if settings.allow_private_targets else "blocked",
     )
     try:
@@ -107,6 +115,19 @@ def create_app() -> FastAPI:
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
+        )
+
+    # authlib's authorization-code flow stores transient state/nonce in the
+    # Starlette session (a separate signed cookie from our app session).
+    if settings.oidc_enabled:
+        from starlette.middleware.sessions import SessionMiddleware
+
+        app.add_middleware(
+            SessionMiddleware,
+            secret_key=settings.session_signing_key,
+            session_cookie="ocspweb_oidc",
+            https_only=settings.session_cookie_secure,
+            same_site="lax",
         )
 
     @app.exception_handler(Exception)

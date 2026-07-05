@@ -107,7 +107,7 @@ def test_run_rejects_missing_saved_cert(app_client):
     config = base_run_config(saved_certs={"issuer_cert": 424242})
     response = app_client.post("/api/test-runs", data={"config": json.dumps(config)})
     assert response.status_code == 400
-    assert "not found in the CA library" in response.json()["detail"]
+    assert "not found in this workspace's CA library" in response.json()["detail"]
 
 
 def test_saved_cert_slot_validation(app_client, cert_fixtures):

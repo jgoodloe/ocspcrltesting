@@ -308,6 +308,147 @@ class RunProfileIn(BaseModel):
     description: Optional[str] = Field(default=None, max_length=2000)
 
 
+Role = Literal["viewer", "member", "admin"]
+RunVisibility = Literal["all", "own"]
+
+
+class UserOut(BaseModel):
+    id: int
+    provider: str
+    subject: str
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    is_global_admin: bool = False
+    is_active: bool = True
+    created_at: Optional[datetime] = None
+    last_login_at: Optional[datetime] = None
+
+
+class LoginIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class AuthConfigOut(BaseModel):
+    """What the login page needs to render (no secrets)."""
+
+    auth_required: bool
+    local_login_enabled: bool
+    oidc_enabled: bool
+    oidc_login_url: Optional[str] = None
+
+
+class WorkspaceOut(BaseModel):
+    id: int
+    name: str
+    kind: str
+    run_visibility: RunVisibility
+    allow_private_targets: bool
+    max_concurrent_runs: int
+    oidc_group: Optional[str] = None
+    role: Optional[Role] = None  # the requesting user's role in this workspace
+    created_at: Optional[datetime] = None
+
+
+class MeOut(BaseModel):
+    user: UserOut
+    workspaces: List[WorkspaceOut] = Field(default_factory=list)
+
+
+class WorkspaceCreateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+
+
+class WorkspaceUpdateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    run_visibility: Optional[RunVisibility] = None
+    allow_private_targets: Optional[bool] = None
+    max_concurrent_runs: Optional[int] = Field(default=None, ge=1, le=64)
+    oidc_group: Optional[str] = Field(default=None, max_length=200)
+
+
+class MemberOut(BaseModel):
+    user_id: int
+    role: Role
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    provider: Optional[str] = None
+
+
+class MemberList(BaseModel):
+    items: List[MemberOut]
+
+
+class MemberAddIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Add by existing user id, or by email (must already exist as a user).
+    user_id: Optional[int] = None
+    email: Optional[str] = Field(default=None, max_length=320)
+    role: Role = "member"
+
+
+class MemberRoleIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Role
+
+
+class TokenOut(BaseModel):
+    id: int
+    name: str
+    workspace_id: Optional[int] = None
+    role_ceiling: Role
+    created_at: Optional[datetime] = None
+    last_used_at: Optional[datetime] = None
+
+
+class TokenList(BaseModel):
+    items: List[TokenOut]
+
+
+class TokenCreateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+    workspace_id: Optional[int] = None
+    role_ceiling: Role = "viewer"
+
+
+class TokenCreatedOut(TokenOut):
+    token: str  # shown exactly once
+
+
+class LocalUserCreateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=8, max_length=1024)
+    display_name: Optional[str] = Field(default=None, max_length=200)
+    is_global_admin: bool = False
+
+
+class AuditEntryOut(BaseModel):
+    id: int
+    ts: datetime
+    actor: Optional[str] = None
+    event: str
+    workspace_id: Optional[int] = None
+    target: Optional[str] = None
+    detail: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AuditList(BaseModel):
+    items: List[AuditEntryOut]
+    total: int
+
+
 class HealthOut(BaseModel):
     status: str
     database: str
