@@ -94,6 +94,24 @@ def _load_spa_index(settings) -> Optional[str]:
     return html.replace('<base href="/">', f'<base href="{base_href}">', 1)
 
 
+# The SPA shell (index.html) must never be served stale: it names the current
+# hashed JS/CSS bundles, so a cached copy pins the browser to an old build after
+# an upgrade (e.g. a new login option silently never appears). Force revalidation.
+_SPA_HTML_HEADERS = {"Cache-Control": "no-cache"}
+
+
+class _ImmutableStatic(StaticFiles):
+    """Serve the built assets with a long, immutable cache. Their filenames are
+    content-hashed by Vite, so a given URL's bytes never change — the browser can
+    cache them for a year and always refetches when the index.html points at a
+    new hash."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+        return response
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level, settings.log_json)
@@ -141,7 +159,7 @@ def create_app() -> FastAPI:
     dist = settings.frontend_dist
     assets_dir = dist / "assets"
     if assets_dir.is_dir():
-        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+        app.mount("/assets", _ImmutableStatic(directory=assets_dir), name="assets")
 
     spa_index = _load_spa_index(settings)
 
@@ -160,7 +178,7 @@ def create_app() -> FastAPI:
             # router so deep links like /runs/<id> work under any base path.
             if full_path.startswith("api/") or full_path == "api":
                 raise HTTPException(status_code=404, detail="Not found")
-            return HTMLResponse(spa_index)
+            return HTMLResponse(spa_index, headers=_SPA_HTML_HEADERS)
 
     else:
 
