@@ -2,11 +2,20 @@ name: build
 
 on:
   push:
-    branches: [main]
+    # main + version tags publish the release images (`latest`, semver).
+    # Feature branches publish a per-branch preview image so a work-in-progress
+    # branch can be deployed with `docker compose up` before it merges.
+    branches: [main, "claude/**"]
     tags: ["v*"]
   pull_request:
     branches: [main]
   workflow_dispatch:
+
+concurrency:
+  # One in-flight run per ref. Cancel superseded feature-branch/PR runs, but
+  # never interrupt a release publish (main or a version tag) mid-push.
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/v') }}
 
 permissions:
   contents: read
@@ -55,7 +64,9 @@ jobs:
   image:
     name: Prebuild container image (GHCR)
     needs: test
-    # Publish only from pushes to main / version tags, never from PRs.
+    # Publish from pushes to main, version tags, and feature branches — never
+    # from PRs (a fork PR's GITHUB_TOKEN cannot write packages, and we do not
+    # want to publish images built from untrusted PR code).
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -72,6 +83,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Feature branches publish a preview image tagged with the branch name,
+      # with the `claude/` session prefix stripped and any remaining slashes
+      # turned into dashes. That makes branch `claude/test-platform-enhancements-be455f`
+      # pullable as `ghcr.io/<repo>:test-platform-enhancements-be455f` on any host.
+      # Skipped for tag pushes (github.ref is refs/tags/*), which use semver tags.
+      - name: Compute branch image tag
+        id: branch
+        if: startsWith(github.ref, 'refs/heads/')
+        run: |
+          ref="${GITHUB_REF#refs/heads/}"
+          ref="${ref#claude/}"
+          ref="${ref//\//-}"
+          echo "tag=$ref" >> "$GITHUB_OUTPUT"
+
       - name: Image metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -82,12 +107,16 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
+            type=raw,value=${{ steps.branch.outputs.tag }},enable=${{ steps.branch.outputs.tag != '' }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
-          # amd64 for servers/NUCs, arm64 for Pi/ARM homelab hosts
+          # amd64 for servers/NUCs, arm64 for Pi/ARM homelab hosts. Both arches
+          # are always built — including for feature-branch preview images — so a
+          # published tag resolves on either host and never yields a
+          # "no matching manifest for linux/amd64" pull error.
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

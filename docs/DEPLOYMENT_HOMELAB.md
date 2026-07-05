@@ -15,10 +15,15 @@ is tracked in issue #5 but is not wired up yet.)
   # =======================================================
 
   ocsp-testing:
-    # Prebuilt by CI (.github/workflows/build.yml) on every push to main,
-    # for amd64 and arm64. If the GHCR package is private, either make it
-    # public (repo → Packages → package settings) or `docker login ghcr.io`
-    # on the host. To build from source instead, replace `image:` with
+    # Prebuilt by CI (.github/workflows/build.yml) for amd64 and arm64. Pushes
+    # to main publish `:latest` (and `:sha-<commit>`); feature branches publish
+    # a preview image tagged with the branch name (the `claude/` session prefix
+    # stripped), e.g. branch `claude/test-platform-enhancements-be455f` →
+    # `ghcr.io/jgoodloe/ocspcrltesting:test-platform-enhancements-be455f`. Every
+    # tag is multi-arch, so it pulls on both x86 servers and ARM homelab hosts.
+    # If the GHCR package is private, either make it public (repo → Packages →
+    # package settings) or `docker login ghcr.io` on the host. To build from
+    # source instead, replace `image:` with
     # `build: https://github.com/jgoodloe/ocspcrltesting.git#main`.
     image: ghcr.io/jgoodloe/ocspcrltesting:latest
     container_name: ocsp-testing
