@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { getVersion, type VersionInfo } from './lib/api';
+import { useAuth } from './lib/auth';
 
 const ICONS = {
   dashboard: (
@@ -49,8 +50,40 @@ const ICONS = {
   ),
 };
 
+const ICONS_EXTRA = {
+  workspaces: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="6" rx="1" />
+      <rect x="3" y="14" width="18" height="6" rx="1" />
+    </svg>
+  ),
+  tokens: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="8" cy="15" r="4" />
+      <path d="M10.8 12.2 20 3M17 6l2 2M14 9l2 2" />
+    </svg>
+  ),
+  admin: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21v-1a6 6 0 0 1 12 0v1" />
+      <path d="M19 8v6M16 11h6" />
+    </svg>
+  ),
+};
+
 export function App() {
   const [version, setVersion] = useState<VersionInfo | null>(null);
+  const {
+    config,
+    me,
+    workspaces,
+    activeWorkspace,
+    setActiveWorkspace,
+    logout,
+  } = useAuth();
+  const authRequired = config?.auth_required ?? false;
+  const isGlobalAdmin = me?.user.is_global_admin ?? false;
 
   useEffect(() => {
     let cancelled = false;
@@ -100,17 +133,67 @@ export function App() {
             {ICONS.caLibrary}
             CA Library
           </NavLink>
+          <NavLink to="/workspaces" className={linkClass}>
+            {ICONS_EXTRA.workspaces}
+            Workspaces
+          </NavLink>
+          <NavLink to="/tokens" className={linkClass}>
+            {ICONS_EXTRA.tokens}
+            API tokens
+          </NavLink>
+          {isGlobalAdmin && (
+            <NavLink to="/admin" className={linkClass}>
+              {ICONS_EXTRA.admin}
+              Admin
+            </NavLink>
+          )}
           <NavLink to="/settings" className={linkClass}>
             {ICONS.settings}
             Settings
           </NavLink>
         </nav>
+        {workspaces.length > 0 && (
+          <div className="sidebar-workspace">
+            <label className="sidebar-ws-label" htmlFor="ws-switch">
+              Workspace
+            </label>
+            <select
+              id="ws-switch"
+              className="input input-sm"
+              value={activeWorkspace?.id ?? ''}
+              onChange={(e) => setActiveWorkspace(Number(e.target.value))}
+            >
+              {workspaces.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="sidebar-footer">
+          {authRequired && me && (
+            <div className="sidebar-user">
+              <span className="sidebar-user-name" title={me.user.email ?? me.user.subject}>
+                {me.user.display_name || me.user.subject}
+              </span>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  void logout();
+                }}
+              >
+                Sign out
+              </button>
+            </div>
+          )}
           {version ? `${version.name} v${version.version}` : ''}
         </div>
       </aside>
       <main className="content" id="main-content" tabIndex={-1}>
-        <div className="content-inner">
+        {/* Remount the routed page when the active workspace changes so each
+            page re-fetches its now workspace-scoped data. */}
+        <div className="content-inner" key={activeWorkspace?.id ?? 'none'}>
           <Outlet />
         </div>
       </main>
