@@ -6,6 +6,7 @@ import {
   fetchCACert,
   listCACerts,
   listWellKnownCAs,
+  renameCACert,
   uploadCACert,
   type CACert,
   type CACertImportResult,
@@ -30,6 +31,8 @@ export function CALibrary() {
   const [busy, setBusy] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<CACert | null>(null);
   const [fileKey, setFileKey] = useState(0);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [editName, setEditName] = useState('');
 
   const load = async () => {
     try {
@@ -101,6 +104,28 @@ export function CALibrary() {
     if (ok) {
       setFetchUrl('');
       setFetchName('');
+    }
+  };
+
+  const startRename = (c: CACert) => {
+    setEditId(c.id);
+    setEditName(c.name);
+    setError(null);
+  };
+
+  const commitRename = async () => {
+    if (editId === null) return;
+    const name = editName.trim();
+    if (!name) {
+      setError('Name cannot be empty.');
+      return;
+    }
+    try {
+      await renameCACert(editId, name);
+      setEditId(null);
+      void load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : 'Rename failed.');
     }
   };
 
@@ -277,7 +302,39 @@ export function CALibrary() {
               <tbody>
                 {certs.map((c) => (
                   <tr key={c.id}>
-                    <td style={{ fontWeight: 600 }}>{c.name}</td>
+                    <td style={{ fontWeight: 600 }}>
+                      {editId === c.id ? (
+                        <span className="form-row">
+                          <input
+                            className="input"
+                            autoFocus
+                            value={editName}
+                            aria-label={`Rename ${c.name}`}
+                            onChange={(e) => setEditName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') void commitRename();
+                              if (e.key === 'Escape') setEditId(null);
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-primary"
+                            onClick={() => void commitRename()}
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-ghost"
+                            onClick={() => setEditId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </span>
+                      ) : (
+                        c.name
+                      )}
+                    </td>
                     <td className="mono truncate" title={c.subject}>
                       {c.subject}
                     </td>
@@ -299,13 +356,23 @@ export function CALibrary() {
                       {c.source}
                     </td>
                     <td className="nowrap" style={{ textAlign: 'right' }}>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => setPendingDelete(c)}
-                      >
-                        Delete
-                      </button>
+                      <span className="toolbar" style={{ justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          disabled={editId === c.id}
+                          onClick={() => startRename(c)}
+                        >
+                          Rename
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setPendingDelete(c)}
+                        >
+                          Delete
+                        </button>
+                      </span>
                     </td>
                   </tr>
                 ))}

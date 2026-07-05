@@ -171,6 +171,7 @@ class RunExecutor:
             max_age_hours=self.config.get("max_age_hours", 24),
             test_cryptographic_preferences=True,
             test_non_issued_certificates=True,
+            nonce_enabled=bool(self.config.get("nonce_enabled", True)),
         )
 
     def run(self) -> None:

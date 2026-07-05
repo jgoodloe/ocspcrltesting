@@ -263,6 +263,12 @@ class CACertList(BaseModel):
     items: List[CACertOut]
 
 
+class CACertUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+
+
 class CACertImportResult(BaseModel):
     created: List[CACertOut]
     skipped_duplicates: int = 0

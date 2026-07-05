@@ -457,6 +457,13 @@ export function cancelRun(runId: string): Promise<RunSummary> {
   });
 }
 
+/** Start a new run reusing this run's config and certificates. */
+export function rerunRun(runId: string): Promise<RunSummary> {
+  return request<RunSummary>(`/test-runs/${encodeURIComponent(runId)}/rerun`, {
+    method: 'POST',
+  });
+}
+
 export function deleteRun(runId: string): Promise<void> {
   return request<void>(`/test-runs/${encodeURIComponent(runId)}`, {
     method: 'DELETE',
@@ -498,6 +505,10 @@ export function fetchCACert(url: string, name?: string): Promise<CACertImportRes
     '/ca-certs/fetch',
     jsonInit('POST', { url, name: name || null }),
   );
+}
+
+export function renameCACert(id: number, name: string): Promise<CACert> {
+  return request<CACert>(`/ca-certs/${id}`, jsonInit('PATCH', { name }));
 }
 
 export function deleteCACert(id: number): Promise<void> {

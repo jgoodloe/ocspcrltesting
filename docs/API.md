@@ -249,6 +249,14 @@ runs; uploaded certificates are not stored). Body:
 Response `201`: the created **Profile**. `409` when the name is taken,
 `404` unknown run.
 
+### `POST /api/test-runs/{run_id}/rerun`
+Starts a **new** run reusing the run's configuration and its already-uploaded
+certificates (copied from the original run's workspace) — no re-selecting
+files. The original run and its results are kept intact; the new run records
+`config.rerun_of` = original run id. Response `201`: the new RunSummary.
+`404` unknown run, `409` when the original certificates are no longer
+available (removed by retention cleanup), `403`/`429` as for `POST /test-runs`.
+
 ### `POST /api/test-runs/{run_id}/cancel`
 Cancels a queued/running run. Response: updated RunSummary. `409` if already finished.
 
@@ -383,6 +391,10 @@ failure, `400` when the payload is not certificate data.
 ### `GET /api/ca-certs/well-known`
 Curated list of well-known Federal PKI CAs
 (`{ key, name, url, description }`) for one-click import via `/fetch`.
+
+### `PATCH /api/ca-certs/{id}`
+Renames a saved certificate. Body `{ "name": "New name" }`. Response: the
+updated CACert. `404` unknown id.
 
 ### `DELETE /api/ca-certs/{id}` — `204`.
 Runs already created keep their materialized copy; profiles referencing the

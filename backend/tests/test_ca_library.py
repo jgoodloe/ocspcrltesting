@@ -47,6 +47,18 @@ def test_ca_upload_rejects_garbage(app_client):
     assert resp.status_code == 400
 
 
+def test_ca_rename(app_client, cert_fixtures):
+    entry = _upload_ca(app_client, cert_fixtures, name="Original").json()["created"][0]
+    renamed = app_client.patch(f"/api/ca-certs/{entry['id']}", json={"name": "Renamed CA"})
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "Renamed CA"
+    listing = app_client.get("/api/ca-certs").json()
+    assert [c["name"] for c in listing["items"]] == ["Renamed CA"]
+
+    assert app_client.patch("/api/ca-certs/999999", json={"name": "x"}).status_code == 404
+    assert app_client.patch(f"/api/ca-certs/{entry['id']}", json={"name": ""}).status_code == 422
+
+
 def test_well_known_list(app_client):
     body = app_client.get("/api/ca-certs/well-known").json()
     names = [c["name"] for c in body["items"]]

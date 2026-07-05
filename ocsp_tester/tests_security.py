@@ -229,55 +229,61 @@ def run_security_tests(
     if should_run("Nonce echo in response"):
         _log("Starting security test: Nonce echo in response")
         r = TestCaseResult(id=str(uuid.uuid4()), category="Security", name="Nonce echo in response", status=TestStatus.PASS)
-        try:
-            monitor = _get_monitor()
-        
-            # Test nonce echo validation
-            issuer_path = os.path.join(tempfile.gettempdir(), f"ocsp_issuer_{uuid.uuid4().hex}.pem")
-            with open(issuer_path, 'wb') as f:
-                f.write(issuer.public_bytes(encoding=serialization.Encoding.PEM))
-        
-            nonce_results = monitor.test_nonce_echo_validation(issuer_path, ocsp_url)
-        
-            if nonce_results.get("nonce_echo_validation", False):
-                r.message = "Nonce echo validation PASSED"
-                r.status = TestStatus.PASS
-            elif nonce_results.get("nonce_support_detected", False):
-                r.message = "Nonce support detected but echo validation failed"
-                r.status = TestStatus.FAIL
-            else:
-                # Check if server requires authentication (which is good security)
-                nonce_tests = nonce_results.get("nonce_tests", [])
-                unauthorized_responses = any(
-                    "unauthorized" in str(test.get("response_details", {}).get("stdout", "")).lower()
-                    for test in nonce_tests
-                )
-            
-                if unauthorized_responses:
-                    r.message = "Server requires authentication - nonce testing limited (this may indicate proper access controls)"
-                    r.status = TestStatus.PASS  # Changed from FAIL to PASS
-                else:
-                    r.message = "No nonce support detected - limited replay attack protection"
-                    r.status = TestStatus.FAIL
-        
-            r.details = {
-                "nonce_support_detected": nonce_results.get("nonce_support_detected", False),
-                "nonce_echo_validation": nonce_results.get("nonce_echo_validation", False),
-                "replay_protection": nonce_results.get("replay_protection", False),
-                "nonce_tests": nonce_results.get("nonce_tests", []),
-                "security_warnings": nonce_results.get("security_warnings", []),
-                "recommendations": nonce_results.get("recommendations", [])
-            }
-        
-            # Cleanup
+        nonce_enabled = getattr(config, "nonce_enabled", True) if config else True
+        if not nonce_enabled:
+            # The user opted out of nonces for this run, so there is nothing to
+            # echo — report SKIP rather than exercising (and failing) the test.
+            r.status = TestStatus.SKIP
+            r.message = "Nonce is disabled in the run configuration; nonce echo test skipped"
+            r.details = {"nonce_enabled": False}
+        else:
             try:
-                os.remove(issuer_path)
-            except:
-                pass
-            
-        except Exception as e:
-            r.status = TestStatus.ERROR
-            r.message = f"Nonce echo validation test failed: {str(e)}"
+                monitor = _get_monitor()
+
+                # Test nonce echo validation
+                issuer_path = os.path.join(tempfile.gettempdir(), f"ocsp_issuer_{uuid.uuid4().hex}.pem")
+                with open(issuer_path, 'wb') as f:
+                    f.write(issuer.public_bytes(encoding=serialization.Encoding.PEM))
+
+                nonce_results = monitor.test_nonce_echo_validation(issuer_path, ocsp_url)
+
+                if nonce_results.get("nonce_echo_validation", False):
+                    r.message = "Nonce echo validation PASSED"
+                    r.status = TestStatus.PASS
+                elif nonce_results.get("nonce_support_detected", False):
+                    r.message = "Nonce support detected but echo validation failed"
+                    r.status = TestStatus.FAIL
+                else:
+                    # Check if server requires authentication (which is good security)
+                    nonce_tests = nonce_results.get("nonce_tests", [])
+                    unauthorized_responses = any(
+                        "unauthorized" in str(test.get("response_details", {}).get("stdout", "")).lower()
+                        for test in nonce_tests
+                    )
+                    if unauthorized_responses:
+                        r.message = "Server requires authentication - nonce testing limited (this may indicate proper access controls)"
+                        r.status = TestStatus.PASS  # Changed from FAIL to PASS
+                    else:
+                        r.message = "No nonce support detected - limited replay attack protection"
+                        r.status = TestStatus.FAIL
+
+                r.details = {
+                    "nonce_support_detected": nonce_results.get("nonce_support_detected", False),
+                    "nonce_echo_validation": nonce_results.get("nonce_echo_validation", False),
+                    "replay_protection": nonce_results.get("replay_protection", False),
+                    "nonce_tests": nonce_results.get("nonce_tests", []),
+                    "security_warnings": nonce_results.get("security_warnings", []),
+                    "recommendations": nonce_results.get("recommendations", [])
+                }
+
+                # Cleanup
+                try:
+                    os.remove(issuer_path)
+                except:
+                    pass
+            except Exception as e:
+                r.status = TestStatus.ERROR
+                r.message = f"Nonce echo validation test failed: {str(e)}"
 
         _finish(r)
 
@@ -437,16 +443,30 @@ def run_security_tests(
                     security_assessment = crypto_results.get("security_assessment", "UNKNOWN")
                     negotiation_successful = crypto_results.get("negotiation_successful", False)
                     downgrade_detected = crypto_results.get("downgrade_detected", False)
-                
-                    if security_assessment == "SECURE":
-                        r.status = TestStatus.PASS
-                        r.message = f"Strong cryptographic algorithms supported: {len(crypto_results.get('supported_algorithms', []))} algorithms"
-                    elif security_assessment == "ACCEPTABLE":
+
+                    # The responder may decline to answer the probe altogether
+                    # (e.g. "unauthorized" — the issuer/CA certificate used for
+                    # the probe is typically out of a responder's scope). That is
+                    # not a cryptographic weakness and, notably, is unrelated to
+                    # OCSP being served over plain HTTP (which is normal, since
+                    # responses are signed). Treat "no usable response" as SKIP
+                    # rather than a security failure.
+                    algo_tests = (crypto_results.get("test_details", {}) or {}).get("algorithm_tests", [])
+                    any_response = any(t.get("response_received") for t in algo_tests)
+
+                    if security_assessment in ("SECURE", "ACCEPTABLE"):
                         r.status = TestStatus.PASS
                         r.message = f"Acceptable cryptographic algorithms supported: {len(crypto_results.get('supported_algorithms', []))} algorithms"
                     elif security_assessment == "WEAK":
                         r.status = TestStatus.FAIL
                         r.message = "Only weak cryptographic algorithms supported"
+                    elif not any_response:
+                        r.status = TestStatus.SKIP
+                        r.message = (
+                            "Responder returned no usable OCSP response for the crypto-preference "
+                            "probe (commonly 'unauthorized' — the issuer/CA certificate is out of "
+                            "the responder's scope); cryptographic preference could not be assessed"
+                        )
                     elif security_assessment == "CRITICAL":
                         r.status = TestStatus.FAIL
                         r.message = "No supported cryptographic algorithms found"

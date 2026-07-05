@@ -34,7 +34,7 @@ from ..schemas import (
     RunSummary,
 )
 from ..ssrf import BlockedTargetError, NetworkPolicy, validate_url
-from ..storage import RunWorkspace
+from ..storage import UPLOAD_SLOTS, RunWorkspace
 from ..settings import get_settings
 from ..test_catalog import validate_selection
 from .catalog import load_global_selection
@@ -204,6 +204,127 @@ async def create_run(
     await manager.start_run(run_id)
     await session.refresh(run)
     logger.info("created run %s -> %s", run_id, run_config.ocsp_url)
+    return run_to_summary(run)
+
+
+@router.post("/test-runs/{run_id}/rerun", response_model=RunSummary, status_code=201)
+async def rerun_run(run_id: str, session: AsyncSession = Depends(get_session)) -> RunSummary:
+    """Start a new run reusing a previous run's configuration and its already
+    uploaded certificates, without re-selecting files. The original run and its
+    results are kept intact — this creates a separate new run."""
+    settings = get_settings()
+    prior = await _get_run_or_404(session, run_id)
+
+    prior_config = dict(prior.config)
+    prior_files = dict(prior_config.get("files", {}) or {})
+
+    # Reconstruct a clean RunConfig from the stored config (drop run-only keys).
+    raw = {k: v for k, v in prior_config.items() if k in RunConfig.model_fields}
+    # The certificates are copied as concrete files below, so this run no longer
+    # depends on the CA library entries the original may have referenced.
+    raw["saved_certs"] = {}
+    try:
+        run_config = RunConfig.model_validate(raw)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"Stored run configuration is invalid: {exc.errors()}"
+        ) from exc
+
+    # The prior workspace holds the uploaded certs; they must still exist (they
+    # are removed by retention cleanup after the configured window).
+    prior_ws = RunWorkspace(settings, run_id)
+    if not (prior_ws.uploads / UPLOAD_SLOTS["issuer_cert"]).is_file():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "The original run's certificates are no longer available "
+                "(they were likely removed by retention cleanup). Start a new run instead."
+            ),
+        )
+
+    policy = NetworkPolicy.from_settings(settings)
+    try:
+        validate_url(run_config.ocsp_url, policy)
+        for crl_url in run_config.crl_urls:
+            validate_url(crl_url, policy)
+    except BlockedTargetError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    selection = run_config.test_selection
+    resolved_tests: Optional[dict] = None
+    if selection.mode == "custom":
+        error = validate_selection(selection.tests)
+        if error:
+            raise HTTPException(status_code=400, detail=error)
+        resolved_tests = selection.tests
+    elif selection.mode == "global":
+        resolved_tests = await load_global_selection(session)
+
+    manager = get_job_manager()
+    if await manager.active_run_count() >= settings.max_concurrent_runs:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Maximum of {settings.max_concurrent_runs} concurrent runs reached; try again later",
+        )
+
+    new_run_id = str(uuid.uuid4())
+    workspace = RunWorkspace(settings, new_run_id).create()
+    stored_files: dict[str, str] = {}
+    file_names: dict[str, str] = {}
+    try:
+        for slot, display in prior_files.items():
+            if slot not in UPLOAD_SLOTS:
+                continue
+            src = prior_ws.uploads / UPLOAD_SLOTS[slot]
+            if not src.is_file():
+                continue
+            dest = workspace.save_upload(slot, src.read_bytes(), sensitive=(slot == "client_key"))
+            stored_files[slot] = str(dest)
+            file_names[slot] = display
+        if "issuer_cert" not in stored_files:
+            raise HTTPException(
+                status_code=409,
+                detail="The original run's issuer certificate is no longer available. Start a new run instead.",
+            )
+    except HTTPException:
+        workspace.delete()
+        raise
+
+    stored_config = run_config.model_dump()
+    stored_config["files"] = file_names
+    stored_config["resolved_test_selection"] = resolved_tests
+    stored_config["rerun_of"] = run_id
+
+    run = Run(
+        id=new_run_id,
+        name=run_config.name,
+        ocsp_url=run_config.ocsp_url,
+        status="queued",
+        config_json=json.dumps(stored_config),
+    )
+    session.add(run)
+    await session.commit()
+
+    manifest_config = run_config.model_dump()
+    manifest_config["resolved_test_selection"] = resolved_tests
+    workspace.write_job_manifest(
+        {
+            "run_id": new_run_id,
+            "config": manifest_config,
+            "files": stored_files,
+            "policy": {
+                "allow_private": policy.allow_private,
+                "allow_redirects": policy.allow_redirects,
+                "max_response_bytes": policy.max_response_bytes,
+                "max_timeout_seconds": policy.max_timeout_seconds,
+                "blocked_hosts": list(policy.blocked_hosts),
+            },
+        }
+    )
+
+    await manager.start_run(new_run_id)
+    await session.refresh(run)
+    logger.info("reran run %s as %s -> %s", run_id, new_run_id, run_config.ocsp_url)
     return run_to_summary(run)
 
 

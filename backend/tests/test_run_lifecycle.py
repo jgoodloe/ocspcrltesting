@@ -126,6 +126,36 @@ def test_teardown_with_live_worker_does_not_hang(app_client, cert_fixtures):
     assert body["status"] in ("queued", "running")
 
 
+def test_rerun_reuses_config_and_certs(app_client, cert_fixtures):
+    """Rerun creates a new run from a prior run's config + certificates, without
+    re-uploading, and keeps the original run and its results intact (#18/#21)."""
+    first = _create_run(app_client, cert_fixtures, name="original")
+    first_id = first.json()["id"]
+    _wait_terminal(app_client, first_id)
+
+    rer = app_client.post(f"/api/test-runs/{first_id}/rerun")
+    assert rer.status_code == 201, rer.text
+    new_id = rer.json()["id"]
+    assert new_id != first_id
+    final = _wait_terminal(app_client, new_id)
+    assert final["status"] == "completed"
+
+    # New run carries the same config and reused certificate file names, and
+    # records provenance.
+    detail = app_client.get(f"/api/test-runs/{new_id}").json()
+    assert detail["config"]["ocsp_url"] == "http://8.8.8.8/ocsp"
+    assert detail["config"]["files"]["issuer_cert"] == "issuer.pem"
+    assert detail["config"]["rerun_of"] == first_id
+
+    # The original run and its results are untouched.
+    orig = app_client.get(f"/api/test-runs/{first_id}").json()
+    assert orig["status"] == "completed"
+    assert app_client.get(f"/api/test-runs/{first_id}/results").json()["total"] == 2
+    assert app_client.get("/api/test-runs").json()["total"] == 2
+
+    assert app_client.post("/api/test-runs/does-not-exist/rerun").status_code == 404
+
+
 def test_ssrf_blocked_url_rejected(app_client, cert_fixtures):
     response = _create_run(app_client, cert_fixtures, ocsp_url="http://127.0.0.1/ocsp")
     assert response.status_code == 403

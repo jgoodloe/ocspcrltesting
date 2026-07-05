@@ -16,6 +16,7 @@ import {
   getResults,
   getRun,
   isTerminalStatus,
+  rerunRun,
   saveRunAsProfile,
   type LogLine,
   type ProgressData,
@@ -52,6 +53,7 @@ export function RunDetailPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveDone, setSaveDone] = useState<string | null>(null);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [rerunning, setRerunning] = useState(false);
 
   const seenLogSeqs = useRef<Set<number>>(new Set());
 
@@ -174,6 +176,19 @@ export function RunDetailPage() {
     }
   };
 
+  const handleRerun = async () => {
+    if (!id) return;
+    setRerunning(true);
+    setActionError(null);
+    try {
+      const created = await rerunRun(id);
+      navigate(`/runs/${created.id}`);
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.detail : 'Rerun failed.');
+      setRerunning(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!id) return;
     setActionError(null);
@@ -233,6 +248,17 @@ export function RunDetailPage() {
               disabled={cancelling}
             >
               {cancelling ? 'Cancelling…' : 'Cancel run'}
+            </button>
+          )}
+          {!active && (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => void handleRerun()}
+              disabled={rerunning}
+              title="Start a new run with the same configuration and certificates"
+            >
+              {rerunning ? 'Starting…' : 'Rerun'}
             </button>
           )}
           <button

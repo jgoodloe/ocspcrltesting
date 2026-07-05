@@ -28,6 +28,7 @@ from ..schemas import (
     CACertImportResult,
     CACertList,
     CACertOut,
+    CACertUpdate,
     WellKnownCA,
     WellKnownCAList,
 )
@@ -228,6 +229,19 @@ async def fetch_ca_cert(
         result.skipped_duplicates,
     )
     return result
+
+
+@router.patch("/ca-certs/{cert_id}", response_model=CACertOut)
+async def rename_ca_cert(
+    cert_id: int, payload: CACertUpdate, session: AsyncSession = Depends(get_session)
+) -> CACertOut:
+    row = await session.get(CACertificate, cert_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Saved certificate not found")
+    row.name = payload.name
+    await session.commit()
+    await session.refresh(row)
+    return _to_out(row)
 
 
 @router.delete("/ca-certs/{cert_id}", status_code=204)
