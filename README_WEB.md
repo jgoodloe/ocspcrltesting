@@ -96,13 +96,22 @@ Everything is environment-driven (`OCSPWEB_*`); see
 | variable | purpose |
 |---|---|
 | `OCSPWEB_BASE_PATH` | subpath deployment, e.g. `/ocsp` |
-| `OCSPWEB_AUTH_PASSWORD` | enable HTTP Basic auth |
-| `OCSPWEB_ALLOW_PRIVATE_TARGETS` | allow lab responders on private networks |
-| `OCSPWEB_MAX_CONCURRENT_RUNS` | run parallelism |
+| `OCSPWEB_DATABASE_URL` | PostgreSQL (recommended) or SQLite (default) |
+| `OCSPWEB_SESSION_SECRET` | enable multi-user auth (sign session cookies) |
+| `OCSPWEB_BOOTSTRAP_ADMIN_PASSWORD` | break-glass local admin |
+| `OCSPWEB_OIDC_ISSUER` / `_CLIENT_ID` / `_CLIENT_SECRET` | OIDC (authentik) SSO |
+| `OCSPWEB_ALLOW_PRIVATE_TARGETS` | allow lab responders (also a per-workspace ceiling) |
+| `OCSPWEB_MAX_CONCURRENT_RUNS` | run parallelism (also a per-workspace ceiling) |
 | `OCSPWEB_RETENTION_DAYS` | uploaded-file retention |
+
+**Multi-user:** with no auth configured the app runs open (single anonymous
+admin, one shared workspace) exactly as before. Set `OCSPWEB_SESSION_SECRET`
+and a bootstrap admin (or OIDC) to enable per-user workspaces, roles and API
+tokens — see [docs/AUTH.md](docs/AUTH.md).
 
 ## Documentation
 
+- [docs/AUTH.md](docs/AUTH.md) — users, workspaces, roles, OIDC, API tokens, migrations
 - [docs/API.md](docs/API.md) — REST/WebSocket/SSE contract
 - [docs/DEPLOYMENT_NGINX.md](docs/DEPLOYMENT_NGINX.md) — nginx root/subpath, systemd, gunicorn
 - [docs/DEPLOYMENT_HOMELAB.md](docs/DEPLOYMENT_HOMELAB.md) — single compose file + Nginx Proxy Manager

@@ -1308,3 +1308,107 @@ table.data tbody tr:last-child td {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* ------------------------------------------------- multi-user / auth UI */
+
+.app-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
+/* Login screen */
+.login-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+  background: var(--bg);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.login-divider {
+  text-align: center;
+  color: var(--faint);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.btn-block {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Sidebar workspace switcher + user block */
+.sidebar-workspace {
+  padding: 10px;
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-ws-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+}
+
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-family: var(--font-ui);
+}
+
+.sidebar-user-name {
+  color: var(--text);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.input-sm {
+  padding: 4px 7px;
+  font-size: 12px;
+}
+
+.input-inline {
+  display: inline-block;
+  width: auto;
+  min-width: 110px;
+}
+
+.token-reveal {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin: 8px 0;
+  overflow-x: auto;
+  white-space: pre;
+}

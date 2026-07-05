@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..authz import Role, WorkspaceContext, active_workspace
 from ..certs import CertificateError, load_certificates_any
 from ..db import get_session
 from ..orm import CACertificate
@@ -98,6 +99,7 @@ def _display_name(cert: x509.Certificate) -> str:
 
 async def _import_certificates(
     session: AsyncSession,
+    ctx: "WorkspaceContext",
     certs: List[x509.Certificate],
     name: Optional[str],
     source: str,
@@ -111,7 +113,10 @@ async def _import_certificates(
         ).hexdigest()
         existing = (
             await session.execute(
-                select(CACertificate).where(CACertificate.fingerprint_sha256 == fingerprint)
+                select(CACertificate).where(
+                    CACertificate.workspace_id == ctx.workspace.id,
+                    CACertificate.fingerprint_sha256 == fingerprint,
+                )
             )
         ).scalar_one_or_none()
         if existing is not None:
@@ -121,6 +126,8 @@ async def _import_certificates(
         # bundle entries are named from their subject CN.
         entry_name = name if (name and len(certs) == 1) else _display_name(cert)
         row = CACertificate(
+            workspace_id=ctx.workspace.id,
+            created_by_user_id=ctx.principal.user.id or None,
             name=entry_name,
             pem=cert.public_bytes(serialization.Encoding.PEM).decode("ascii"),
             subject=cert.subject.rfc4514_string(),
@@ -150,10 +157,17 @@ def _is_ca(cert: x509.Certificate) -> bool:
 
 
 @router.get("/ca-certs", response_model=CACertList)
-async def list_ca_certs(session: AsyncSession = Depends(get_session)) -> CACertList:
+async def list_ca_certs(
+    ctx: WorkspaceContext = Depends(active_workspace(Role.viewer)),
+    session: AsyncSession = Depends(get_session),
+) -> CACertList:
     rows = (
-        (await session.execute(select(CACertificate).order_by(CACertificate.name))).scalars().all()
-    )
+        await session.execute(
+            select(CACertificate)
+            .where(CACertificate.workspace_id == ctx.workspace.id)
+            .order_by(CACertificate.name)
+        )
+    ).scalars().all()
     return CACertList(items=[_to_out(r) for r in rows])
 
 
@@ -166,6 +180,7 @@ async def list_well_known_cas() -> WellKnownCAList:
 async def upload_ca_cert(
     file: UploadFile,
     name: Optional[str] = None,
+    ctx: WorkspaceContext = Depends(active_workspace(Role.member)),
     session: AsyncSession = Depends(get_session),
 ) -> CACertImportResult:
     data = await read_limited_upload(file)
@@ -173,7 +188,7 @@ async def upload_ca_cert(
         certs = load_certificates_any(data)
     except CertificateError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    result = await _import_certificates(session, certs, name, source="upload")
+    result = await _import_certificates(session, ctx, certs, name, source="upload")
     logger.info(
         "CA library upload: %d created, %d duplicates skipped",
         len(result.created),
@@ -184,7 +199,9 @@ async def upload_ca_cert(
 
 @router.post("/ca-certs/fetch", response_model=CACertImportResult, status_code=201)
 async def fetch_ca_cert(
-    payload: CACertFetchIn, session: AsyncSession = Depends(get_session)
+    payload: CACertFetchIn,
+    ctx: WorkspaceContext = Depends(active_workspace(Role.member)),
+    session: AsyncSession = Depends(get_session),
 ) -> CACertImportResult:
     settings = get_settings()
     policy = NetworkPolicy.from_settings(settings)
@@ -219,7 +236,7 @@ async def fetch_ca_cert(
 
     well_known = any(w.url == payload.url for w in WELL_KNOWN_CAS)
     result = await _import_certificates(
-        session, certs, payload.name, source="well-known" if well_known else "url",
+        session, ctx, certs, payload.name, source="well-known" if well_known else "url",
         source_url=payload.url,
     )
     logger.info(
@@ -231,13 +248,21 @@ async def fetch_ca_cert(
     return result
 
 
+async def _get_in_ws_or_404(session: AsyncSession, cert_id: int, workspace_id: int) -> CACertificate:
+    row = await session.get(CACertificate, cert_id)
+    if row is None or row.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Saved certificate not found")
+    return row
+
+
 @router.patch("/ca-certs/{cert_id}", response_model=CACertOut)
 async def rename_ca_cert(
-    cert_id: int, payload: CACertUpdate, session: AsyncSession = Depends(get_session)
+    cert_id: int,
+    payload: CACertUpdate,
+    ctx: WorkspaceContext = Depends(active_workspace(Role.member)),
+    session: AsyncSession = Depends(get_session),
 ) -> CACertOut:
-    row = await session.get(CACertificate, cert_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Saved certificate not found")
+    row = await _get_in_ws_or_404(session, cert_id, ctx.workspace.id)
     row.name = payload.name
     await session.commit()
     await session.refresh(row)
@@ -245,10 +270,12 @@ async def rename_ca_cert(
 
 
 @router.delete("/ca-certs/{cert_id}", status_code=204)
-async def delete_ca_cert(cert_id: int, session: AsyncSession = Depends(get_session)) -> Response:
-    row = await session.get(CACertificate, cert_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Saved certificate not found")
+async def delete_ca_cert(
+    cert_id: int,
+    ctx: WorkspaceContext = Depends(active_workspace(Role.member)),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    row = await _get_in_ws_or_404(session, cert_id, ctx.workspace.id)
     await session.delete(row)
     await session.commit()
     return Response(status_code=204)

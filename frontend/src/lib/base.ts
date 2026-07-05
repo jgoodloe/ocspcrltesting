@@ -20,6 +20,37 @@ export function apiUrl(path: string): string {
   return `${getBasePath()}/api${path}`;
 }
 
+// ---------------------------------------------------------------------------
+// Active workspace: workspace-scoped API calls carry a `workspace_id` query
+// parameter for the currently selected workspace. When unset the backend
+// falls back to the caller's personal/default workspace (single-user use).
+// ---------------------------------------------------------------------------
+
+let activeWorkspaceId: number | null = null;
+
+export function setActiveWorkspaceId(id: number | null): void {
+  activeWorkspaceId = id;
+}
+
+export function getActiveWorkspaceId(): number | null {
+  return activeWorkspaceId;
+}
+
+const SCOPED_PREFIXES = ['/test-runs', '/profiles', '/ca-certs'];
+
+/** Append the active workspace id to a workspace-scoped API path. */
+export function withWorkspace(path: string): string {
+  if (activeWorkspaceId == null) return path;
+  const base = path.split('?')[0];
+  const scoped = SCOPED_PREFIXES.some(
+    (p) => base === p || base.startsWith(`${p}/`),
+  );
+  // `/ca-certs/well-known` is global; the extra param is harmless but omit it.
+  if (!scoped) return path;
+  const sep = path.includes('?') ? '&' : '?';
+  return `${path}${sep}workspace_id=${activeWorkspaceId}`;
+}
+
 /** Builds a WebSocket URL for the same host, honoring https -> wss. */
 export function wsUrl(path: string): string {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';

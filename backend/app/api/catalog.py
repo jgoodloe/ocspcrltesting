@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..authz import Principal, current_principal
 from ..db import get_session
 from ..orm import AppSetting, utcnow
 from ..schemas import (
@@ -74,8 +75,13 @@ async def get_global_test_selection(
 
 @router.put("/settings/test-selection", response_model=GlobalTestSelection)
 async def put_global_test_selection(
-    payload: GlobalTestSelection, session: AsyncSession = Depends(get_session)
+    payload: GlobalTestSelection,
+    principal: Principal = Depends(current_principal),
+    session: AsyncSession = Depends(get_session),
 ) -> GlobalTestSelection:
+    # The global default selection is a deployment-wide setting: admin-only.
+    if not principal.is_global_admin:
+        raise HTTPException(status_code=403, detail="Global admin required")
     if payload.tests is not None:
         error = validate_selection(payload.tests)
         if error:

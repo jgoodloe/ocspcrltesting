@@ -2,7 +2,10 @@
  * Typed API client mirroring docs/API.md exactly.
  * All requests go through apiUrl() so the app is subpath safe.
  */
-import { apiUrl } from './base';
+import { apiUrl, getActiveWorkspaceId, withWorkspace } from './base';
+
+/** Fired when any API call returns 401 so the auth layer can react (log out). */
+export const AUTH_UNAUTHORIZED_EVENT = 'ocspweb:unauthorized';
 
 // ---------------------------------------------------------------------------
 // Types (mirror API.md)
@@ -328,8 +331,11 @@ async function extractDetail(res: Response): Promise<string> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(apiUrl(path), init);
+  const res = await fetch(apiUrl(withWorkspace(path)), init);
   if (!res.ok) {
+    if (res.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT));
+    }
     throw new ApiError(res.status, await extractDetail(res));
   }
   if (res.status === 204) {
@@ -444,11 +450,11 @@ export function getLogs(
 }
 
 export function exportJsonUrl(runId: string): string {
-  return apiUrl(`/test-runs/${encodeURIComponent(runId)}/export/json`);
+  return apiUrl(withWorkspace(`/test-runs/${encodeURIComponent(runId)}/export/json`));
 }
 
 export function exportCsvUrl(runId: string): string {
-  return apiUrl(`/test-runs/${encodeURIComponent(runId)}/export/csv`);
+  return apiUrl(withWorkspace(`/test-runs/${encodeURIComponent(runId)}/export/csv`));
 }
 
 export function cancelRun(runId: string): Promise<RunSummary> {
@@ -568,6 +574,204 @@ export function deleteProfile(profileId: number): Promise<void> {
 // ---------------------------------------------------------------------------
 // Defaults
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Multi-user: auth, workspaces, members, API tokens, admin
+// ---------------------------------------------------------------------------
+
+export type Role = 'viewer' | 'member' | 'admin';
+export type RunVisibility = 'all' | 'own';
+export type WorkspaceKind = 'personal' | 'shared';
+
+export interface User {
+  id: number;
+  provider: 'oidc' | 'local';
+  subject: string;
+  email: string | null;
+  display_name: string | null;
+  is_global_admin: boolean;
+  is_active: boolean;
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export interface Workspace {
+  id: number;
+  name: string;
+  kind: WorkspaceKind;
+  run_visibility: RunVisibility;
+  allow_private_targets: boolean;
+  max_concurrent_runs: number;
+  oidc_group: string | null;
+  role: Role | null;
+  created_at: string;
+}
+
+export interface AuthConfig {
+  auth_required: boolean;
+  local_login_enabled: boolean;
+  oidc_enabled: boolean;
+  oidc_login_url: string | null;
+}
+
+export interface Me {
+  user: User;
+  workspaces: Workspace[];
+}
+
+export interface Member {
+  user_id: number;
+  role: Role;
+  email: string | null;
+  display_name: string | null;
+  provider: string | null;
+}
+
+export interface ApiToken {
+  id: number;
+  name: string;
+  workspace_id: number | null;
+  role_ceiling: Role;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export interface ApiTokenCreated extends ApiToken {
+  token: string;
+}
+
+export interface AuditEntry {
+  id: number;
+  ts: string;
+  actor: string | null;
+  event: string;
+  workspace_id: number | null;
+  target: string | null;
+  detail: Record<string, unknown>;
+}
+
+export function getAuthConfig(): Promise<AuthConfig> {
+  return request<AuthConfig>('/auth/config');
+}
+
+export function login(username: string, password: string): Promise<User> {
+  return request<User>('/auth/login', jsonInit('POST', { username, password }));
+}
+
+export function logout(): Promise<void> {
+  return request<void>('/auth/logout', { method: 'POST' });
+}
+
+export function getMe(): Promise<Me> {
+  return request<Me>('/auth/me');
+}
+
+export function listWorkspaces(): Promise<Workspace[]> {
+  return request<Workspace[]>('/workspaces');
+}
+
+export function createWorkspace(name: string): Promise<Workspace> {
+  return request<Workspace>('/workspaces', jsonInit('POST', { name }));
+}
+
+export interface WorkspaceUpdate {
+  name?: string;
+  run_visibility?: RunVisibility;
+  allow_private_targets?: boolean;
+  max_concurrent_runs?: number;
+  oidc_group?: string | null;
+}
+
+export function updateWorkspace(id: number, patch: WorkspaceUpdate): Promise<Workspace> {
+  return request<Workspace>(`/workspaces/${id}`, jsonInit('PATCH', patch));
+}
+
+export function deleteWorkspace(id: number): Promise<void> {
+  return request<void>(`/workspaces/${id}`, { method: 'DELETE' });
+}
+
+export function listMembers(workspaceId: number): Promise<{ items: Member[] }> {
+  return request<{ items: Member[] }>(`/workspaces/${workspaceId}/members`);
+}
+
+export function addMember(
+  workspaceId: number,
+  input: { user_id?: number | null; email?: string | null; role: Role },
+): Promise<Member> {
+  return request<Member>(`/workspaces/${workspaceId}/members`, jsonInit('POST', input));
+}
+
+export function changeMemberRole(
+  workspaceId: number,
+  userId: number,
+  role: Role,
+): Promise<Member> {
+  return request<Member>(
+    `/workspaces/${workspaceId}/members/${userId}`,
+    jsonInit('PATCH', { role }),
+  );
+}
+
+export function removeMember(workspaceId: number, userId: number): Promise<void> {
+  return request<void>(`/workspaces/${workspaceId}/members/${userId}`, {
+    method: 'DELETE',
+  });
+}
+
+export function getWorkspaceAudit(
+  workspaceId: number,
+  limit = 100,
+): Promise<{ items: AuditEntry[]; total: number }> {
+  return request<{ items: AuditEntry[]; total: number }>(
+    `/workspaces/${workspaceId}/audit?limit=${limit}`,
+  );
+}
+
+export function listTokens(): Promise<{ items: ApiToken[] }> {
+  return request<{ items: ApiToken[] }>('/tokens');
+}
+
+export function createToken(input: {
+  name: string;
+  workspace_id?: number | null;
+  role_ceiling: Role;
+}): Promise<ApiTokenCreated> {
+  return request<ApiTokenCreated>('/tokens', jsonInit('POST', input));
+}
+
+export function revokeToken(id: number): Promise<void> {
+  return request<void>(`/tokens/${id}`, { method: 'DELETE' });
+}
+
+export function listUsers(): Promise<User[]> {
+  return request<User[]>('/admin/users');
+}
+
+export function createLocalUser(input: {
+  username: string;
+  password: string;
+  display_name?: string | null;
+  is_global_admin?: boolean;
+}): Promise<User> {
+  return request<User>('/admin/users', jsonInit('POST', input));
+}
+
+export function setUserActive(userId: number, active: boolean): Promise<User> {
+  return request<User>(`/admin/users/${userId}/active?active=${active}`, {
+    method: 'POST',
+  });
+}
+
+export function getGlobalAudit(
+  limit = 200,
+  offset = 0,
+): Promise<{ items: AuditEntry[]; total: number }> {
+  return request<{ items: AuditEntry[]; total: number }>(
+    `/admin/audit?limit=${limit}&offset=${offset}`,
+  );
+}
+
+export { getActiveWorkspaceId };
 
 export function defaultRunConfig(): RunConfig {
   return {

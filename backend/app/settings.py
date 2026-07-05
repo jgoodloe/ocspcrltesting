@@ -30,9 +30,38 @@ class Settings(BaseSettings):
     database_url: str = Field(default="", description="SQLAlchemy async URL; defaults to sqlite in data_dir")
 
     # --- auth / CORS ---
+    # Legacy shared-password Basic auth (deprecated by the multi-user model;
+    # retained only so an in-place upgrade keeps working during migration).
     auth_username: str = "admin"
-    auth_password: str = Field(default="", description="Enable HTTP Basic auth when non-empty")
+    auth_password: str = Field(default="", description="DEPRECATED shared-password Basic auth")
     cors_origins: str = Field(default="", description="Comma-separated allowed origins; empty disables CORS headers")
+
+    # --- multi-user auth / sessions ---
+    # When false, the app runs open (no login) — only intended for isolated
+    # single-user/dev use. Any auth configuration below turns it on.
+    session_secret: str = Field(
+        default="", description="Secret key that signs session cookies; set a stable value in production"
+    )
+    session_ttl_seconds: int = Field(default=8 * 3600, ge=300)
+    session_cookie_name: str = "ocspweb_session"
+    session_cookie_secure: bool = Field(default=True, description="Set Secure flag on the session cookie (HTTPS)")
+
+    # Break-glass local admin, created at first boot when no users exist yet.
+    bootstrap_admin_username: str = Field(default="admin")
+    bootstrap_admin_password: str = Field(
+        default="", description="If set, ensures a local global-admin account exists at startup"
+    )
+
+    # Local password login (in addition to OIDC). Disable to force OIDC-only
+    # (the bootstrap admin still works as break-glass).
+    local_login_enabled: bool = True
+
+    # OIDC (authentik). All four must be set to enable the OIDC login button.
+    oidc_issuer: str = Field(default="", description="OIDC issuer URL, e.g. https://authentik.example.com/application/o/ocsp/")
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    oidc_scopes: str = Field(default="openid email profile", description="Space-separated OIDC scopes")
+    oidc_group_claim: str = Field(default="groups", description="Claim carrying group names for optional group sync")
 
     # --- uploads / retention ---
     max_upload_bytes: int = 5 * 1024 * 1024
@@ -89,6 +118,30 @@ class Settings(BaseSettings):
     @property
     def auth_enabled(self) -> bool:
         return bool(self.auth_password)
+
+    @property
+    def oidc_enabled(self) -> bool:
+        return bool(self.oidc_issuer and self.oidc_client_id and self.oidc_client_secret)
+
+    @property
+    def oidc_scope_list(self) -> List[str]:
+        return [s for s in self.oidc_scopes.split() if s]
+
+    @property
+    def session_signing_key(self) -> str:
+        """Key used to sign session cookies. A stable value must be set in
+        production (multi-worker / restarts); otherwise a random per-process
+        key is used and sessions do not survive a restart."""
+        if self.session_secret:
+            return self.session_secret
+        import secrets as _secrets
+
+        # Cache a per-process ephemeral key so it is stable within the process.
+        key = getattr(self, "_ephemeral_session_key", None)
+        if key is None:
+            key = _secrets.token_urlsafe(48)
+            object.__setattr__(self, "_ephemeral_session_key", key)
+        return key
 
 
 @lru_cache

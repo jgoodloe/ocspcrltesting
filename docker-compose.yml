@@ -2,6 +2,9 @@ services:
   app:
     build: .
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     env_file:
       - path: .env
         required: false
@@ -9,10 +12,36 @@ services:
       # Uncomment for subpath deployment (and switch nginx to subpath.conf):
       # OCSPWEB_BASE_PATH: /ocsp
       OCSPWEB_DATA_DIR: /data
+      # PostgreSQL is the recommended engine for multi-user deployments. The
+      # value below matches the `db` service; override in .env if you point at
+      # an external database. Comment this out to fall back to on-disk SQLite.
+      OCSPWEB_DATABASE_URL: ${OCSPWEB_DATABASE_URL:-postgresql+asyncpg://ocspweb:ocspweb@db:5432/ocspweb}
+      # A stable secret is REQUIRED in production so sessions survive restarts
+      # and multiple workers agree. Generate one: `openssl rand -hex 32`.
+      OCSPWEB_SESSION_SECRET: ${OCSPWEB_SESSION_SECRET:-}
+      # Break-glass local admin (created/refreshed at startup). Set a password
+      # to enable login; leave empty to run open (single-user/dev only).
+      OCSPWEB_BOOTSTRAP_ADMIN_USERNAME: ${OCSPWEB_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      OCSPWEB_BOOTSTRAP_ADMIN_PASSWORD: ${OCSPWEB_BOOTSTRAP_ADMIN_PASSWORD:-}
     volumes:
       - ocsp_data:/data
     expose:
       - "8000"
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ocspweb
+      POSTGRES_PASSWORD: ocspweb
+      POSTGRES_DB: ocspweb
+    volumes:
+      - ocsp_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ocspweb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   nginx:
     image: nginx:1.27-alpine
@@ -29,3 +58,4 @@ services:
 
 volumes:
   ocsp_data:
+  ocsp_pgdata:

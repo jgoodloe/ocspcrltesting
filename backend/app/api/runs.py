@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..authz import Principal, Role, WorkspaceContext, active_workspace, current_principal
 from ..certs import (
     CertificateError,
     load_certificate,
@@ -53,11 +54,54 @@ OPTIONAL_CERT_SLOTS = (
 )
 
 
-async def _get_run_or_404(session: AsyncSession, run_id: str) -> Run:
+async def _get_run_or_404(session: AsyncSession, run_id: str, ctx: WorkspaceContext) -> Run:
     run = await session.get(Run, run_id)
-    if run is None:
+    if run is None or run.workspace_id != ctx.workspace.id:
+        raise HTTPException(status_code=404, detail="Test run not found")
+    # "own" visibility: non-privileged members only see runs they created.
+    if (
+        ctx.workspace.run_visibility == "own"
+        and ctx.role < Role.admin
+        and not ctx.principal.is_global_admin
+        and run.created_by_user_id
+        and run.created_by_user_id != ctx.principal.user.id
+    ):
         raise HTTPException(status_code=404, detail="Test run not found")
     return run
+
+
+def _workspace_policy(ctx: WorkspaceContext) -> NetworkPolicy:
+    """Network policy for this workspace: the deployment settings, with
+    private-target access gated by the workspace's own (ceiling-capped) flag."""
+    settings = get_settings()
+    policy = NetworkPolicy.from_settings(settings)
+    policy.allow_private = bool(settings.allow_private_targets and ctx.workspace.allow_private_targets)
+    return policy
+
+
+async def _active_run_count(session: AsyncSession, workspace_id: int) -> int:
+    """Number of not-yet-finished runs in a workspace (for concurrency caps)."""
+    return int(
+        (
+            await session.execute(
+                select(func.count(Run.id)).where(
+                    Run.workspace_id == workspace_id,
+                    Run.status.notin_(list(TERMINAL_STATUSES)),
+                )
+            )
+        ).scalar_one()
+    )
+
+
+def _visibility_filter(stmt, ctx: WorkspaceContext):
+    """Restrict a Run query to the caller when the workspace hides others' runs."""
+    if (
+        ctx.workspace.run_visibility == "own"
+        and ctx.role < Role.admin
+        and not ctx.principal.is_global_admin
+    ):
+        stmt = stmt.where(Run.created_by_user_id == ctx.principal.user.id)
+    return stmt
 
 
 @router.post("/test-runs", response_model=RunSummary, status_code=201)
@@ -70,6 +114,7 @@ async def create_run(
     trust_anchor: Optional[UploadFile] = None,
     client_cert: Optional[UploadFile] = None,
     client_key: Optional[UploadFile] = None,
+    ctx: WorkspaceContext = Depends(active_workspace(Role.member)),
     session: AsyncSession = Depends(get_session),
 ) -> RunSummary:
     settings = get_settings()
@@ -80,8 +125,9 @@ async def create_run(
         raise HTTPException(status_code=400, detail=f"Invalid run configuration: {exc.errors()}") from exc
 
     # SSRF policy applies at submission time (and again inside the worker for
-    # every actual request, including AIA/CDP URLs discovered later).
-    policy = NetworkPolicy.from_settings(settings)
+    # every actual request, including AIA/CDP URLs discovered later). Private
+    # targets are gated by the workspace's own policy.
+    policy = _workspace_policy(ctx)
     try:
         validate_url(run_config.ocsp_url, policy)
         for crl_url in run_config.crl_urls:
@@ -102,10 +148,11 @@ async def create_run(
         resolved_tests = await load_global_selection(session)
 
     manager = get_job_manager()
-    if await manager.active_run_count() >= settings.max_concurrent_runs:
+    ws_limit = min(ctx.workspace.max_concurrent_runs, settings.max_concurrent_runs)
+    if await _active_run_count(session, ctx.workspace.id) >= ws_limit:
         raise HTTPException(
             status_code=429,
-            detail=f"Maximum of {settings.max_concurrent_runs} concurrent runs reached; try again later",
+            detail=f"Maximum of {ws_limit} concurrent runs reached for this workspace; try again later",
         )
 
     run_id = str(uuid.uuid4())
@@ -135,10 +182,10 @@ async def create_run(
                     detail=f"{slot}: both an uploaded file and a saved certificate were provided",
                 )
             saved = await session.get(CACertificate, cert_id)
-            if saved is None:
+            if saved is None or saved.workspace_id != ctx.workspace.id:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"{slot}: saved certificate #{cert_id} not found in the CA library",
+                    detail=f"{slot}: saved certificate #{cert_id} not found in this workspace's CA library",
                 )
             path = workspace.save_upload(slot, saved.pem.encode("ascii"))
             stored_files[slot] = str(path)
@@ -176,6 +223,8 @@ async def create_run(
 
     run = Run(
         id=run_id,
+        workspace_id=ctx.workspace.id,
+        created_by_user_id=ctx.principal.user.id or None,
         name=run_config.name,
         ocsp_url=run_config.ocsp_url,
         status="queued",
@@ -208,12 +257,16 @@ async def create_run(
 
 
 @router.post("/test-runs/{run_id}/rerun", response_model=RunSummary, status_code=201)
-async def rerun_run(run_id: str, session: AsyncSession = Depends(get_session)) -> RunSummary:
+async def rerun_run(
+    run_id: str,
+    ctx: WorkspaceContext = Depends(active_workspace(Role.member)),
+    session: AsyncSession = Depends(get_session),
+) -> RunSummary:
     """Start a new run reusing a previous run's configuration and its already
     uploaded certificates, without re-selecting files. The original run and its
     results are kept intact — this creates a separate new run."""
     settings = get_settings()
-    prior = await _get_run_or_404(session, run_id)
+    prior = await _get_run_or_404(session, run_id, ctx)
 
     prior_config = dict(prior.config)
     prior_files = dict(prior_config.get("files", {}) or {})
@@ -242,7 +295,7 @@ async def rerun_run(run_id: str, session: AsyncSession = Depends(get_session)) -
             ),
         )
 
-    policy = NetworkPolicy.from_settings(settings)
+    policy = _workspace_policy(ctx)
     try:
         validate_url(run_config.ocsp_url, policy)
         for crl_url in run_config.crl_urls:
@@ -261,10 +314,11 @@ async def rerun_run(run_id: str, session: AsyncSession = Depends(get_session)) -
         resolved_tests = await load_global_selection(session)
 
     manager = get_job_manager()
-    if await manager.active_run_count() >= settings.max_concurrent_runs:
+    ws_limit = min(ctx.workspace.max_concurrent_runs, settings.max_concurrent_runs)
+    if await _active_run_count(session, ctx.workspace.id) >= ws_limit:
         raise HTTPException(
             status_code=429,
-            detail=f"Maximum of {settings.max_concurrent_runs} concurrent runs reached; try again later",
+            detail=f"Maximum of {ws_limit} concurrent runs reached for this workspace; try again later",
         )
 
     new_run_id = str(uuid.uuid4())
@@ -297,6 +351,8 @@ async def rerun_run(run_id: str, session: AsyncSession = Depends(get_session)) -
 
     run = Run(
         id=new_run_id,
+        workspace_id=ctx.workspace.id,
+        created_by_user_id=ctx.principal.user.id or None,
         name=run_config.name,
         ocsp_url=run_config.ocsp_url,
         status="queued",
@@ -333,10 +389,13 @@ async def list_runs(
     limit: int = Query(default=20, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     status: Optional[str] = None,
+    ctx: WorkspaceContext = Depends(active_workspace(Role.viewer)),
     session: AsyncSession = Depends(get_session),
 ) -> RunList:
-    stmt = select(Run)
-    count_stmt = select(func.count(Run.id))
+    stmt = _visibility_filter(select(Run).where(Run.workspace_id == ctx.workspace.id), ctx)
+    count_stmt = _visibility_filter(
+        select(func.count(Run.id)).where(Run.workspace_id == ctx.workspace.id), ctx
+    )
     if status:
         statuses = [s.strip() for s in status.split(",") if s.strip()]
         stmt = stmt.where(Run.status.in_(statuses))
@@ -351,8 +410,12 @@ async def list_runs(
 
 
 @router.get("/test-runs/{run_id}", response_model=RunDetail)
-async def get_run(run_id: str, session: AsyncSession = Depends(get_session)) -> RunDetail:
-    run = await _get_run_or_404(session, run_id)
+async def get_run(
+    run_id: str,
+    ctx: WorkspaceContext = Depends(active_workspace(Role.viewer)),
+    session: AsyncSession = Depends(get_session),
+) -> RunDetail:
+    run = await _get_run_or_404(session, run_id, ctx)
     return run_to_detail(run)
 
 
@@ -362,9 +425,10 @@ async def get_results(
     category: Optional[str] = None,
     status: Optional[str] = None,
     q: Optional[str] = None,
+    ctx: WorkspaceContext = Depends(active_workspace(Role.viewer)),
     session: AsyncSession = Depends(get_session),
 ) -> ResultList:
-    await _get_run_or_404(session, run_id)
+    await _get_run_or_404(session, run_id, ctx)
     stmt = select(Result).where(Result.run_id == run_id)
     if category:
         stmt = stmt.where(Result.category.in_([c.strip() for c in category.split(",") if c.strip()]))
@@ -382,9 +446,10 @@ async def get_logs(
     run_id: str,
     after_seq: int = Query(default=0, ge=0),
     limit: int = Query(default=1000, ge=1, le=10000),
+    ctx: WorkspaceContext = Depends(active_workspace(Role.viewer)),
     session: AsyncSession = Depends(get_session),
 ) -> LogList:
-    run = await _get_run_or_404(session, run_id)
+    run = await _get_run_or_404(session, run_id, ctx)
     stmt = (
         select(RunEvent)
         .where(RunEvent.run_id == run_id, RunEvent.type == "log", RunEvent.seq > after_seq)
@@ -405,8 +470,12 @@ async def get_logs(
 
 
 @router.get("/test-runs/{run_id}/export/json")
-async def export_json(run_id: str, session: AsyncSession = Depends(get_session)) -> JSONResponse:
-    run = await _get_run_or_404(session, run_id)
+async def export_json(
+    run_id: str,
+    ctx: WorkspaceContext = Depends(active_workspace(Role.viewer)),
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    run = await _get_run_or_404(session, run_id, ctx)
     results = (
         (await session.execute(select(Result).where(Result.run_id == run_id).order_by(Result.started_at)))
         .scalars()
@@ -425,8 +494,12 @@ async def export_json(run_id: str, session: AsyncSession = Depends(get_session))
 
 
 @router.get("/test-runs/{run_id}/export/csv")
-async def export_csv(run_id: str, session: AsyncSession = Depends(get_session)) -> PlainTextResponse:
-    await _get_run_or_404(session, run_id)
+async def export_csv(
+    run_id: str,
+    ctx: WorkspaceContext = Depends(active_workspace(Role.viewer)),
+    session: AsyncSession = Depends(get_session),
+) -> PlainTextResponse:
+    await _get_run_or_404(session, run_id, ctx)
     results = (
         (await session.execute(select(Result).where(Result.run_id == run_id).order_by(Result.started_at)))
         .scalars()
@@ -441,12 +514,15 @@ async def export_csv(run_id: str, session: AsyncSession = Depends(get_session)) 
 
 @router.post("/test-runs/{run_id}/profile", response_model=ProfileOut, status_code=201)
 async def save_run_as_profile(
-    run_id: str, payload: RunProfileIn, session: AsyncSession = Depends(get_session)
+    run_id: str,
+    payload: RunProfileIn,
+    ctx: WorkspaceContext = Depends(active_workspace(Role.member)),
+    session: AsyncSession = Depends(get_session),
 ) -> ProfileOut:
     """Save an existing run's configuration as a reusable profile."""
     from .profiles import _check_name_free, _to_out
 
-    run = await _get_run_or_404(session, run_id)
+    run = await _get_run_or_404(session, run_id, ctx)
     # The stored run config carries run-only bookkeeping ("files",
     # "resolved_test_selection"); keep only real RunConfig fields.
     raw = {k: v for k, v in run.config.items() if k in RunConfig.model_fields}
@@ -457,8 +533,10 @@ async def save_run_as_profile(
             status_code=422, detail=f"Run configuration cannot be saved as a profile: {exc.errors()}"
         ) from exc
 
-    await _check_name_free(session, payload.name)
+    await _check_name_free(session, ctx.workspace.id, payload.name)
     profile = Profile(
+        workspace_id=ctx.workspace.id,
+        created_by_user_id=ctx.principal.user.id or None,
         name=payload.name,
         description=payload.description,
         config_json=json.dumps(config.model_dump(exclude={"profile_id"})),
@@ -471,8 +549,12 @@ async def save_run_as_profile(
 
 
 @router.post("/test-runs/{run_id}/cancel", response_model=RunSummary)
-async def cancel_run(run_id: str, session: AsyncSession = Depends(get_session)) -> RunSummary:
-    run = await _get_run_or_404(session, run_id)
+async def cancel_run(
+    run_id: str,
+    ctx: WorkspaceContext = Depends(active_workspace(Role.member)),
+    session: AsyncSession = Depends(get_session),
+) -> RunSummary:
+    run = await _get_run_or_404(session, run_id, ctx)
     if run.status in TERMINAL_STATUSES:
         raise HTTPException(status_code=409, detail=f"Run already finished with status {run.status}")
     await get_job_manager().cancel_run(run_id)
@@ -481,8 +563,12 @@ async def cancel_run(run_id: str, session: AsyncSession = Depends(get_session)) 
 
 
 @router.delete("/test-runs/{run_id}", status_code=204)
-async def delete_run(run_id: str, session: AsyncSession = Depends(get_session)) -> Response:
-    run = await _get_run_or_404(session, run_id)
+async def delete_run(
+    run_id: str,
+    ctx: WorkspaceContext = Depends(active_workspace(Role.member)),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    run = await _get_run_or_404(session, run_id, ctx)
     if run.status not in TERMINAL_STATUSES:
         await get_job_manager().cancel_run(run_id)
     await session.delete(run)
