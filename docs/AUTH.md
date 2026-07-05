@@ -72,6 +72,54 @@ group-driven memberships are reconciled (below).
 To force SSO-only, set `OCSPWEB_LOCAL_LOGIN_ENABLED=false` (the break-glass
 admin still works for recovery).
 
+### Enabling authentik SSO — checklist
+
+The "Sign in with SSO" button only appears when **all three** of
+`OCSPWEB_OIDC_ISSUER`, `OCSPWEB_OIDC_CLIENT_ID` and `OCSPWEB_OIDC_CLIENT_SECRET`
+are set to non-empty values (that is the whole `oidc_enabled` rule). Setting the
+issuer alone gives you the local login only.
+
+1. **In authentik**, create an *OAuth2/OpenID Provider* and an *Application*
+   bound to it. Note the **application slug** — the issuer is
+   `https://<authentik-host>/application/o/<slug>/`, and the issuer you configure
+   must belong to the **same** application whose client id/secret you use.
+2. **Add the redirect URI** to that provider, exactly (no trailing slash, https):
+   ```
+   https://<your-public-host>/api/auth/oidc/callback
+   ```
+   e.g. `https://certtesting.goodloe.xyz/api/auth/oidc/callback`.
+3. **Set the four required variables plus the public URL** in `.env` — one block,
+   no duplicates:
+   ```ini
+   OCSPWEB_OIDC_ISSUER=https://<authentik-host>/application/o/<slug>/
+   OCSPWEB_OIDC_CLIENT_ID=<from the provider>
+   OCSPWEB_OIDC_CLIENT_SECRET=<from the provider>
+   OCSPWEB_OIDC_SCOPES=openid email profile
+   OCSPWEB_PUBLIC_BASE_URL=https://<your-public-host>
+   ```
+4. **Recreate the container** — an `env_file` change does *not* apply on a plain
+   `docker compose restart`:
+   ```bash
+   docker compose up -d --force-recreate ocsp-testing
+   ```
+5. Reload the login page: you should now see local login **and** an SSO button.
+
+**Troubleshooting "no SSO button":**
+
+- A **duplicate** `OCSPWEB_OIDC_ISSUER` (or client id/secret) later in the file
+  overrides the earlier one — a leftover placeholder such as
+  `https://<your-authentik-host>/...` will silently win. Keep exactly one of each.
+- You edited `.env` but only ran `restart` — recreate instead (step 4).
+- One of the three values is blank/commented — all three are mandatory.
+
+**Troubleshooting "button works but login fails":** the issuer doesn't match the
+application that issued the client id/secret, or the redirect URI in authentik
+doesn't exactly match `…/api/auth/oidc/callback` at your public host.
+
+> Treat the client secret and `OCSPWEB_SESSION_SECRET` as credentials: never
+> paste them anywhere shared, and rotate them (new secret in authentik, new
+> `openssl rand -hex 32` session secret) if they are ever exposed.
+
 ### Group → role mapping
 
 Each shared workspace can map IdP groups to roles. On the **Workspaces** page a
