@@ -28,6 +28,13 @@ is tracked in issue #5 but is not wired up yet.)
     image: ghcr.io/jgoodloe/ocspcrltesting:latest
     container_name: ocsp-testing
     restart: unless-stopped
+    # Inject the whole .env into the CONTAINER. This is required for auth: a
+    # root .env is only used for ${VAR} substitution in this file — it is NOT
+    # passed to the container unless a var is listed under environment: or
+    # pulled in here. Without env_file the OCSPWEB_OIDC_* vars never reach the
+    # app and the SSO button silently never appears. See docs/AUTH.md.
+    env_file:
+      - .env
     healthcheck:
       # curl is not in the image; the healthcheck is python-based
       test: ["CMD", "python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status==200 else 1)"]
@@ -37,8 +44,6 @@ is tracked in issue #5 but is not wired up yet.)
       timeout: 5s
     environment:
       OCSPWEB_DATA_DIR: /data
-      # Shared admin login (HTTP Basic, user defaults to "admin")
-      OCSPWEB_AUTH_PASSWORD: ${OCSP_ADMIN_PASS:?ocsp admin password required}
       # Homelab: allow testing responders/CRLs on RFC1918 addresses.
       # Leave false if you only test public responders — see docs/SECURITY.md
       OCSPWEB_ALLOW_PRIVATE_TARGETS: ${OCSP_ALLOW_PRIVATE:-true}
@@ -55,8 +60,32 @@ is tracked in issue #5 but is not wired up yet.)
       - nginx_proxy_manager_network
 ```
 
-The full list of `OCSPWEB_*` variables, with documentation, is in
-[`.env.example`](../.env.example).
+Put the auth/secret settings in a `.env` file next to the compose file (the
+`env_file: [.env]` above loads them into the container):
+
+```ini
+# Multi-user auth (see docs/AUTH.md). Required for login to be enforced.
+OCSPWEB_SESSION_SECRET=<openssl rand -hex 32>
+OCSPWEB_BOOTSTRAP_ADMIN_PASSWORD=<something-strong>   # break-glass local admin
+OCSPWEB_PUBLIC_BASE_URL=https://ocsp.example.com
+
+# authentik / OIDC SSO (optional) — all three needed for the SSO button.
+OCSPWEB_OIDC_ISSUER=https://auth.example.com/application/o/<app-slug>/
+OCSPWEB_OIDC_CLIENT_ID=...
+OCSPWEB_OIDC_CLIENT_SECRET=...
+OCSPWEB_OIDC_SCOPES=openid email profile
+OCSPWEB_OIDC_GROUP_CLAIM=groups
+```
+
+> **Gotcha:** editing `.env` and running `docker compose restart` does **not**
+> reload it. Use `docker compose up -d --force-recreate ocsp-testing`. Verify
+> with `docker compose exec ocsp-testing env | grep OIDC` or
+> `curl -s https://<host>/api/auth/config` (expect `"oidc_enabled": true`).
+
+`OCSPWEB_AUTH_PASSWORD` (the old shared HTTP Basic password) is superseded by the
+multi-user model and no longer recommended. The full list of `OCSPWEB_*`
+variables is in [`.env.example`](../.env.example); auth specifics, including
+group → role mapping, are in [`docs/AUTH.md`](AUTH.md).
 
 ## Bind-mount permissions (the one gotcha)
 
