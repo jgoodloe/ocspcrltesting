@@ -284,6 +284,62 @@ def test_share_profile_requires_contributor_in_target(auth_env):
     assert [p["name"] for p in shared] == ["shareme"]
 
 
+def test_share_ca_cert_requires_contributor_in_target(auth_env, cert_fixtures):
+    """Saved certificates can be copied into a workspace where the user is a
+    member/admin, but not one where they are only a viewer (issue #27)."""
+    auth_env.cookies.clear()
+    _login(auth_env, "admin", "admin-pw!")
+    auth_env.post("/api/admin/users", json={"username": "grace", "password": "grace-secret"})
+    users = {u["subject"]: u["id"] for u in auth_env.get("/api/admin/users").json()}
+    contributor_ws = auth_env.post("/api/workspaces", json={"name": "ca-contrib"}).json()["id"]
+    viewer_ws = auth_env.post("/api/workspaces", json={"name": "ca-viewonly"}).json()["id"]
+
+    auth_env.cookies.clear()
+    _login(auth_env, "grace", "grace-secret")
+    personal = auth_env.get("/api/auth/me").json()["workspaces"][0]["id"]
+    entry = auth_env.post(
+        f"/api/ca-certs?workspace_id={personal}",
+        files={"file": ("ca.pem", cert_fixtures["ca_pem"])},
+    ).json()["created"][0]
+
+    auth_env.cookies.clear()
+    _login(auth_env, "admin", "admin-pw!")
+    auth_env.post(
+        f"/api/workspaces/{contributor_ws}/members",
+        json={"user_id": users["grace"], "role": "member"},
+    )
+    auth_env.post(
+        f"/api/workspaces/{viewer_ws}/members",
+        json={"user_id": users["grace"], "role": "viewer"},
+    )
+
+    auth_env.cookies.clear()
+    _login(auth_env, "grace", "grace-secret")
+    # Viewer in the target -> refused.
+    denied = auth_env.post(
+        f"/api/ca-certs/{entry['id']}/share?workspace_id={personal}",
+        json={"target_workspace_id": viewer_ws},
+    )
+    assert denied.status_code == 403, denied.text
+    # Member in the target -> copied (same fingerprint now lives in two workspaces).
+    ok = auth_env.post(
+        f"/api/ca-certs/{entry['id']}/share?workspace_id={personal}",
+        json={"target_workspace_id": contributor_ws},
+    )
+    assert ok.status_code == 201, ok.text
+    assert len(ok.json()["created"]) == 1
+    shared = auth_env.get(f"/api/ca-certs?workspace_id={contributor_ws}").json()["items"]
+    assert [c["fingerprint_sha256"] for c in shared] == [entry["fingerprint_sha256"]]
+    # Sharing the same cert again is a no-op dedupe, not an error.
+    again = auth_env.post(
+        f"/api/ca-certs/{entry['id']}/share?workspace_id={personal}",
+        json={"target_workspace_id": contributor_ws},
+    )
+    assert again.status_code == 201, again.text
+    assert again.json()["created"] == []
+    assert again.json()["skipped_duplicates"] == 1
+
+
 def test_policy_ceiling_enforced(auth_env):
     # allow_private_targets defaults off for the deployment, so a workspace
     # cannot enable it.
