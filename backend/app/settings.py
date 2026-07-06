@@ -56,6 +56,16 @@ class Settings(BaseSettings):
     # (the bootstrap admin still works as break-glass).
     local_login_enabled: bool = True
 
+    # Fail-closed guard: when NO authentication is configured the app would run
+    # "open" (a single anonymous global admin). That is only safe for an
+    # isolated single-user/dev box, so startup refuses to run open unless this
+    # is explicitly set. Turn it on only when you understand the surface is
+    # unauthenticated.
+    allow_open_mode: bool = Field(
+        default=False,
+        description="Explicitly permit running with no authentication (anonymous global admin). Isolated/dev use only.",
+    )
+
     # OIDC (authentik). All four must be set to enable the OIDC login button.
     oidc_issuer: str = Field(default="", description="OIDC issuer URL, e.g. https://authentik.example.com/application/o/ocsp/")
     oidc_client_id: str = ""

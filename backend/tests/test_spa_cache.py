@@ -23,6 +23,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("OCSPWEB_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("OCSPWEB_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 'spa.sqlite3'}")
     monkeypatch.setenv("OCSPWEB_AUTH_PASSWORD", "")
+    monkeypatch.setenv("OCSPWEB_ALLOW_OPEN_MODE", "true")  # SPA served in open mode here
     monkeypatch.setenv("OCSPWEB_FRONTEND_DIST", str(dist))
 
     from backend.app import db, jobs, settings

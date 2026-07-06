@@ -20,9 +20,11 @@ services:
       # and multiple workers agree. Generate one: `openssl rand -hex 32`.
       OCSPWEB_SESSION_SECRET: ${OCSPWEB_SESSION_SECRET:-}
       # Break-glass local admin (created/refreshed at startup). Set a password
-      # to enable login; leave empty to run open (single-user/dev only).
+      # to enable login. With no auth configured the app refuses to start unless
+      # OCSPWEB_ALLOW_OPEN_MODE=true — set that only for an isolated/dev box.
       OCSPWEB_BOOTSTRAP_ADMIN_USERNAME: ${OCSPWEB_BOOTSTRAP_ADMIN_USERNAME:-admin}
       OCSPWEB_BOOTSTRAP_ADMIN_PASSWORD: ${OCSPWEB_BOOTSTRAP_ADMIN_PASSWORD:-}
+      OCSPWEB_ALLOW_OPEN_MODE: ${OCSPWEB_ALLOW_OPEN_MODE:-false}
     volumes:
       - ocsp_data:/data
     expose:

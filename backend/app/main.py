@@ -48,6 +48,26 @@ async def _retention_loop() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    from .authz import auth_active
+
+    # Fail closed: with no auth configured every request is an anonymous global
+    # admin, so refuse to start unless the operator has explicitly opted into
+    # open mode (isolated single-user/dev use only).
+    if not auth_active():
+        if not settings.allow_open_mode:
+            raise RuntimeError(
+                "Refusing to start: no authentication is configured, which would run the "
+                "app as an anonymous global admin reachable by anyone who can hit the port. "
+                "Configure auth (set OCSPWEB_SESSION_SECRET and OCSPWEB_BOOTSTRAP_ADMIN_PASSWORD, "
+                "or enable OIDC), or — for isolated single-user/dev use only — set "
+                "OCSPWEB_ALLOW_OPEN_MODE=true."
+            )
+        logger.warning(
+            "OPEN MODE: no authentication is configured; every request is treated as an "
+            "anonymous global admin. Unsafe on any shared or network-reachable host. Set "
+            "OCSPWEB_SESSION_SECRET + OCSPWEB_BOOTSTRAP_ADMIN_PASSWORD (or OIDC) to enable auth."
+        )
+
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.runs_dir.mkdir(parents=True, exist_ok=True)
     await init_db()

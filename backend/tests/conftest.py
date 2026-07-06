@@ -21,6 +21,8 @@ def app_client(tmp_path, monkeypatch):
     monkeypatch.setenv("OCSPWEB_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 'test.sqlite3'}")
     monkeypatch.setenv("OCSPWEB_WORKER_PYTHON", str(FAKE_WORKER))
     monkeypatch.setenv("OCSPWEB_AUTH_PASSWORD", "")
+    # These tests exercise the app in open (no-auth) mode on purpose.
+    monkeypatch.setenv("OCSPWEB_ALLOW_OPEN_MODE", "true")
     monkeypatch.setenv("OCSPWEB_MAX_CONCURRENT_RUNS", "4")
 
     from backend.app import db, jobs, settings

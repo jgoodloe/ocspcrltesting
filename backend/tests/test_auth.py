@@ -76,6 +76,35 @@ def test_auth_required_when_configured(auth_env):
     assert cfg["local_login_enabled"] is True
 
 
+def test_open_mode_refused_without_optin(tmp_path, monkeypatch):
+    """With no auth configured and no explicit opt-in, startup fails closed
+    rather than running as an anonymous global admin (issue #30)."""
+    monkeypatch.setenv("OCSPWEB_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("OCSPWEB_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 'open.sqlite3'}")
+    monkeypatch.setenv("OCSPWEB_AUTH_PASSWORD", "")
+    monkeypatch.delenv("OCSPWEB_ALLOW_OPEN_MODE", raising=False)
+
+    from backend.app import db, jobs, settings
+
+    settings.get_settings.cache_clear()
+    jobs.reset_job_manager()
+    db._engine = None
+    db._session_factory = None
+
+    from fastapi.testclient import TestClient
+
+    from backend.app.main import create_app
+
+    with pytest.raises(RuntimeError):
+        with TestClient(create_app()):
+            pass
+
+    settings.get_settings.cache_clear()
+    jobs.reset_job_manager()
+    db._engine = None
+    db._session_factory = None
+
+
 def test_bootstrap_admin_login_and_me(auth_env):
     auth_env.cookies.clear()
     _login(auth_env, "admin", "admin-pw!")
