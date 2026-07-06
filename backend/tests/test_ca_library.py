@@ -80,6 +80,28 @@ def test_ca_view_details_and_download(app_client, cert_fixtures):
     assert app_client.get("/api/ca-certs/999999/download").status_code == 404
 
 
+def test_ca_view_includes_parsed_extensions(app_client, cert_fixtures):
+    # The leaf fixture carries AIA (OCSP), CRL DP, SKI and AKI extensions.
+    up = app_client.post(
+        "/api/ca-certs",
+        params={"name": "Leaf w/ exts"},
+        files={"file": ("leaf.pem", cert_fixtures["leaf_pem"])},
+    )
+    assert up.status_code == 201, up.text
+    cert_id = up.json()["created"][0]["id"]
+
+    detail = app_client.get(f"/api/ca-certs/{cert_id}").json()
+    exts = detail["extensions"]
+    assert exts["aia_ocsp_urls"] == ["http://ocsp.test.example"]
+    assert exts["crl_distribution_points"] == ["http://crl.test.example/ca.crl"]
+    assert exts["subject_key_identifier"]
+    assert exts["authority_key_identifier"]
+    # Extensions absent on the fixture come back as empty lists, not errors.
+    assert exts["subject_alt_names"] == []
+    assert exts["extended_key_usage"] == []
+    assert exts["certificate_policies"] == []
+
+
 def test_well_known_list(app_client):
     body = app_client.get("/api/ca-certs/well-known").json()
     names = [c["name"] for c in body["items"]]

@@ -21,7 +21,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..authz import Role, WorkspaceContext, active_workspace, authorize_workspace_role
-from ..certs import CertificateError, load_certificates_any
+from ..certs import (
+    CertificateError,
+    certificate_extensions,
+    load_certificate,
+    load_certificates_any,
+)
+from ..schemas import CertExtensions
 from ..db import get_session
 from ..orm import CACertificate
 from ..schemas import (
@@ -91,7 +97,11 @@ def _to_out(row: CACertificate) -> CACertOut:
 
 
 def _to_detail(row: CACertificate) -> CACertDetail:
-    return CACertDetail(**_to_out(row).model_dump(), pem=row.pem)
+    try:
+        exts = certificate_extensions(load_certificate(row.pem.encode()))
+    except Exception:  # a stored cert that won't re-parse still shows its PEM
+        exts = CertExtensions()
+    return CACertDetail(**_to_out(row).model_dump(), pem=row.pem, extensions=exts)
 
 
 def _display_name(cert: x509.Certificate) -> str:

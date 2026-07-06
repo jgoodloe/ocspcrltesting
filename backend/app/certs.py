@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed448, ed25519, rsa
 from cryptography.x509.oid import AuthorityInformationAccessOID, ExtensionOID
 
-from .schemas import CertMetadata
+from .schemas import CertExtensions, CertMetadata
 
 
 class CertificateError(ValueError):
@@ -173,4 +173,119 @@ def extract_metadata(cert: x509.Certificate) -> CertMetadata:
         is_ca=is_ca,
         expired=not_after < datetime.now(timezone.utc),
         self_signed=cert.subject == cert.issuer,
+    )
+
+
+def _oid_label(oid: x509.ObjectIdentifier) -> str:
+    """Human name + dotted OID when a friendly name is known, else the OID."""
+    name = getattr(oid, "_name", None)
+    if name and name != "Unknown OID":
+        return f"{name} ({oid.dotted_string})"
+    return oid.dotted_string
+
+
+def _general_name(gn: x509.GeneralName) -> str:
+    if isinstance(gn, x509.DNSName):
+        return f"DNS:{gn.value}"
+    if isinstance(gn, x509.RFC822Name):
+        return f"email:{gn.value}"
+    if isinstance(gn, x509.UniformResourceIdentifier):
+        return f"URI:{gn.value}"
+    if isinstance(gn, x509.IPAddress):
+        return f"IP:{gn.value}"
+    if isinstance(gn, x509.DirectoryName):
+        return f"DirName:{gn.value.rfc4514_string()}"
+    if isinstance(gn, x509.RegisteredID):
+        return f"RID:{gn.value.dotted_string}"
+    try:
+        return str(gn.value)
+    except Exception:
+        return str(gn)
+
+
+def certificate_extensions(cert: x509.Certificate) -> CertExtensions:
+    """Extract the commonly-inspected X.509 v3 extensions for display: SAN, key
+    usage, extended key usage, certificate policies, AIA, CRL distribution
+    points, and the subject/authority key identifiers. Missing extensions yield
+    empty values rather than errors."""
+    ext = cert.extensions
+
+    def _get(oid):
+        try:
+            return ext.get_extension_for_oid(oid).value
+        except x509.ExtensionNotFound:
+            return None
+
+    san: List[str] = []
+    san_val = _get(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
+    if san_val is not None:
+        san = [_general_name(gn) for gn in san_val]
+
+    key_usage: List[str] = []
+    ku = _get(ExtensionOID.KEY_USAGE)
+    if ku is not None:
+        for attr, label in (
+            ("digital_signature", "digitalSignature"),
+            ("content_commitment", "contentCommitment (nonRepudiation)"),
+            ("key_encipherment", "keyEncipherment"),
+            ("data_encipherment", "dataEncipherment"),
+            ("key_agreement", "keyAgreement"),
+            ("key_cert_sign", "keyCertSign"),
+            ("crl_sign", "cRLSign"),
+        ):
+            if getattr(ku, attr, False):
+                key_usage.append(label)
+        if ku.key_agreement:  # encipher/decipher_only only valid with key_agreement
+            if ku.encipher_only:
+                key_usage.append("encipherOnly")
+            if ku.decipher_only:
+                key_usage.append("decipherOnly")
+
+    eku: List[str] = []
+    eku_val = _get(ExtensionOID.EXTENDED_KEY_USAGE)
+    if eku_val is not None:
+        eku = [_oid_label(oid) for oid in eku_val]
+
+    policies: List[str] = []
+    pol_val = _get(ExtensionOID.CERTIFICATE_POLICIES)
+    if pol_val is not None:
+        policies = [_oid_label(pi.policy_identifier) for pi in pol_val]
+
+    aia_ocsp: List[str] = []
+    aia_issuers: List[str] = []
+    aia = _get(ExtensionOID.AUTHORITY_INFORMATION_ACCESS)
+    if aia is not None:
+        for desc in aia:
+            if isinstance(desc.access_location, x509.UniformResourceIdentifier):
+                if desc.access_method == AuthorityInformationAccessOID.OCSP:
+                    aia_ocsp.append(desc.access_location.value)
+                elif desc.access_method == AuthorityInformationAccessOID.CA_ISSUERS:
+                    aia_issuers.append(desc.access_location.value)
+
+    cdps: List[str] = []
+    cdp = _get(ExtensionOID.CRL_DISTRIBUTION_POINTS)
+    if cdp is not None:
+        for dp in cdp:
+            for name in dp.full_name or []:
+                if isinstance(name, x509.UniformResourceIdentifier):
+                    cdps.append(name.value)
+
+    ski = aki = None
+    ski_val = _get(ExtensionOID.SUBJECT_KEY_IDENTIFIER)
+    if ski_val is not None:
+        ski = _hex_keyid(ski_val.digest)
+    aki_val = _get(ExtensionOID.AUTHORITY_KEY_IDENTIFIER)
+    if aki_val is not None:
+        aki = _hex_keyid(aki_val.key_identifier)
+
+    return CertExtensions(
+        subject_alt_names=san,
+        key_usage=key_usage,
+        extended_key_usage=eku,
+        certificate_policies=policies,
+        aia_ocsp_urls=aia_ocsp,
+        aia_ca_issuers=aia_issuers,
+        crl_distribution_points=cdps,
+        subject_key_identifier=ski,
+        authority_key_identifier=aki,
     )

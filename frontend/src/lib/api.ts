@@ -109,9 +109,23 @@ export interface CACert {
   created_at: string;
 }
 
+export interface CertExtensions {
+  subject_alt_names: string[];
+  key_usage: string[];
+  extended_key_usage: string[];
+  certificate_policies: string[];
+  aia_ocsp_urls: string[];
+  aia_ca_issuers: string[];
+  crl_distribution_points: string[];
+  subject_key_identifier: string | null;
+  authority_key_identifier: string | null;
+}
+
 export interface CACertDetail extends CACert {
   /** The stored certificate in PEM form (for inspection and download). */
   pem: string;
+  /** Parsed X.509 v3 extensions for display. */
+  extensions: CertExtensions;
 }
 
 export interface CACertImportResult {

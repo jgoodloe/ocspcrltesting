@@ -20,6 +20,34 @@ import {
 } from '../lib/api';
 import { formatDateTime } from '../lib/format';
 
+/** A definition row that renders each value on its own line, hidden when empty. */
+function ExtRow({ label, values }: { label: string; values: string[] }) {
+  if (!values || values.length === 0) return null;
+  return (
+    <>
+      <dt>{label}</dt>
+      <dd>
+        {values.map((v, i) => (
+          <div key={i} style={{ wordBreak: 'break-all' }}>
+            {v}
+          </div>
+        ))}
+      </dd>
+    </>
+  );
+}
+
+/** A single-value definition row, hidden when the value is empty. */
+function ExtValue({ label, value }: { label: string; value: string | null }) {
+  if (!value) return null;
+  return (
+    <>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </>
+  );
+}
+
 /**
  * Saved CA certificate library: store commonly used roots and issuing CAs
  * (Federal Common Policy, agency SSP CAs, lab CAs) once, then pick them on
@@ -464,7 +492,7 @@ export function CALibrary() {
             role="dialog"
             aria-modal="true"
             aria-label={`Certificate ${viewCert.name}`}
-            style={{ width: 'min(680px, 94vw)' }}
+            style={{ width: 'min(680px, 94vw)', maxHeight: '88vh', overflowY: 'auto' }}
             onMouseDown={(e) => e.stopPropagation()}
           >
             <h3>{viewCert.name}</h3>
@@ -498,9 +526,24 @@ export function CALibrary() {
                   {viewCert.source}
                   {viewCert.source_url ? ` — ${viewCert.source_url}` : ''}
                 </dd>
+                <ExtRow label="Subject Alt Names" values={viewCert.extensions?.subject_alt_names ?? []} />
+                <ExtRow label="Key Usage" values={viewCert.extensions?.key_usage ?? []} />
+                <ExtRow label="Extended Key Usage" values={viewCert.extensions?.extended_key_usage ?? []} />
+                <ExtRow label="Certificate Policies" values={viewCert.extensions?.certificate_policies ?? []} />
+                <ExtRow label="AIA — OCSP" values={viewCert.extensions?.aia_ocsp_urls ?? []} />
+                <ExtRow label="AIA — CA Issuers" values={viewCert.extensions?.aia_ca_issuers ?? []} />
+                <ExtRow label="CRL Distribution" values={viewCert.extensions?.crl_distribution_points ?? []} />
+                <ExtValue label="Subject Key ID" value={viewCert.extensions?.subject_key_identifier ?? null} />
+                <ExtValue label="Authority Key ID" value={viewCert.extensions?.authority_key_identifier ?? null} />
               </dl>
             </div>
-            <div className="token-reveal mono" style={{ marginTop: 12 }}>
+            <div className="section-label" style={{ marginTop: 14 }}>
+              PEM
+            </div>
+            <div
+              className="token-reveal mono"
+              style={{ marginTop: 4, maxHeight: 150, overflow: 'auto', fontSize: 11 }}
+            >
               {viewCert.pem}
             </div>
             <div className="dialog-actions">

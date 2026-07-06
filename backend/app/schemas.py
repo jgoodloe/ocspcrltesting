@@ -259,11 +259,26 @@ class CACertOut(BaseModel):
     created_at: datetime
 
 
+class CertExtensions(BaseModel):
+    """Commonly-inspected X.509 v3 extensions, parsed for display."""
+
+    subject_alt_names: List[str] = Field(default_factory=list)
+    key_usage: List[str] = Field(default_factory=list)
+    extended_key_usage: List[str] = Field(default_factory=list)
+    certificate_policies: List[str] = Field(default_factory=list)
+    aia_ocsp_urls: List[str] = Field(default_factory=list)
+    aia_ca_issuers: List[str] = Field(default_factory=list)
+    crl_distribution_points: List[str] = Field(default_factory=list)
+    subject_key_identifier: Optional[str] = None
+    authority_key_identifier: Optional[str] = None
+
+
 class CACertDetail(CACertOut):
     """Full saved-certificate record, including the stored PEM for inspection
-    and download."""
+    and download, plus parsed v3 extensions."""
 
     pem: str
+    extensions: CertExtensions = Field(default_factory=CertExtensions)
 
 
 class CACertList(BaseModel):
