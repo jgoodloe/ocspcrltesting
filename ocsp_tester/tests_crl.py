@@ -9,6 +9,25 @@ from .models import TestCaseResult, TestStatus, result_sink
 from .ocsp_client import send_ocsp_request, OCSPRequestSpec
 from .selection import should_run
 
+# An OCSP response is only flagged as aging once producedAt is well within a
+# normal publication window. A few hours old is completely routine, so warn
+# only past 18h and treat >24h as a hard problem.
+PRODUCED_AT_WARN_SECONDS = 18 * 3600   # 64800
+PRODUCED_AT_FAIL_SECONDS = 24 * 3600   # 86400
+
+
+def _produced_at_issue(produced_dt, now) -> Optional[str]:
+    """Classify an OCSP producedAt timestamp: None when acceptable, a warning
+    ("somewhat old") past 18h, and a critical issue past 24h / in the future."""
+    if produced_dt > now:
+        return "producedAt in future"
+    age_seconds = (now - produced_dt).total_seconds()
+    if age_seconds > PRODUCED_AT_FAIL_SECONDS:
+        return "producedAt very old"
+    if age_seconds > PRODUCED_AT_WARN_SECONDS:
+        return "producedAt somewhat old"
+    return None
+
 
 def run_crl_tests(
     ocsp_url: str,
@@ -115,12 +134,9 @@ def run_crl_tests(
                         }
                     })
                 
-                    if produced_dt > now:
-                        timestamp_issues.append("producedAt in future")
-                    elif (now - produced_dt).total_seconds() > 86400:  # More than 24 hours old
-                        timestamp_issues.append("producedAt very old")
-                    elif (now - produced_dt).total_seconds() > 3600:  # More than 1 hour old (warning)
-                        timestamp_issues.append("producedAt somewhat old")
+                    issue = _produced_at_issue(produced_dt, now)
+                    if issue:
+                        timestamp_issues.append(issue)
                 except Exception as e:
                     timestamp_issues.append(f"invalid producedAt format: {e}")
         
