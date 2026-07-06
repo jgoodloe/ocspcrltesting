@@ -5,69 +5,81 @@ to [Semantic Versioning](https://semver.org/).
 
 ## v1.0.0 — Initial release
 
-Initial public release of **OCSP/CRL Testing Web** — a FastAPI + React
-application (with a companion CLI) for validating OCSP responders and CRLs
-against RFC 6960 / RFC 5280 and U.S. Federal PKI requirements, with multi-user
-workspaces.
+**OCSP/CRL Testing Web** is a self-hostable web application (with a companion
+CLI) for testing and monitoring OCSP responders and CRL endpoints. It exercises
+certificates and revocation infrastructure against RFC 6960 (OCSP), RFC 5280
+(certificate/CRL profile and path validation), and U.S. Federal PKI / Federal
+Bridge requirements, and reports what passed, what failed, and why.
 
-### Highlights
+### What it does
 
-**Test engine**
-- OCSP protocol, certificate status, CRL, RFC 5280 path validation, Federal
-  Bridge PKI, performance, security/error-handling, and IKEv2 test categories.
-- AIA/CRL chain discovery, PKCS#7 (`.p7c`) bundle handling, and per-test result
-  streaming to the live Run page.
+Point it at an OCSP responder URL (and optional CRL URLs), give it the
+certificates to test, and it runs the selected suites:
 
-**Multi-user**
-- Workspaces with viewer / member / admin roles; per-run, per-profile and
-  per-certificate isolation.
-- OIDC (authentik) SSO and local login with signed session cookies; OIDC
-  group → role sync.
-- Per-user API tokens — workspace-scoped and role-capped — for automation.
+- **OCSP protocol** — GET/POST transport, DER encoding, response structure,
+  nonce handling, and hash-algorithm support.
+- **Certificate status** — good / revoked / unknown / unauthorized responses.
+- **CRL** — distribution-point discovery, fetch and parse, signature and
+  freshness checks, and CRL-vs-OCSP consistency.
+- **Path validation (RFC 5280)** — signature and name chaining, validity
+  periods, basic constraints, key usage, path-length, and policy processing,
+  with AIA-based chain discovery and PKCS#7 (`.p7c`) bundle handling.
+- **Federal PKI / Federal Bridge** — policy mapping, delegated-responder EKU,
+  and agency response handling.
+- **Performance** — latency sampling and optional load testing.
+- **Security & error handling** — response signature validation and
+  unauthorized/malformed/`sigRequired` request handling.
+- **IKEv2** — informational OCSP-in-IKEv2 checks.
 
-**Certificates & profiles**
-- Saved CA certificate library (upload, fetch-by-URL, or well-known Federal PKI
-  import).
-- Reusable run profiles.
-- View (with parsed v3 extensions: SAN, key usage, EKU, certificate policies,
-  AIA, CRL distribution points, SKI/AKI), download, and share into other
+Results stream live, one per test, with a pass / fail / warn / skip / error
+status, the relevant RFC references, and per-test diagnostics (the HTTP
+exchanges and commands that ran). Runs can be exported as JSON or CSV.
+
+### Ways to use it
+
+- **Web UI** — interactive runs, live progress, and run history.
+- **REST API** — for automation and CI, authenticated with per-user bearer
+  tokens (see `docs/API.md`).
+- **CLI** (`cli.py`) — local or scripted runs.
+
+### Multi-user
+
+- Organize work into **workspaces** with **viewer / member / admin** roles;
+  runs, profiles, and saved certificates are isolated per workspace.
+- Sign in with **OIDC SSO** (e.g. authentik) or local username/password; OIDC
+  groups can map to workspace roles.
+- Mint **API tokens** scoped to a workspace and capped to a role.
+
+### Certificates & profiles
+
+- Keep a **saved CA library** (upload, fetch by URL, or import well-known
+  Federal PKI CAs) and reference it in runs instead of re-uploading files.
+- Inspect a saved certificate's details and v3 extensions — Subject Alternative
+  Names, key usage, extended key usage, certificate policies, AIA, CRL
+  distribution points, and key identifiers — download its PEM, or share it into
+  another workspace.
+- Save run configurations as reusable **profiles**, and share them across
   workspaces.
 
-**Deployment**
-- Docker / docker-compose and systemd; PostgreSQL or SQLite; reverse-proxy
-  subpath aware.
+### Running it
 
-### Security
+- **Requirements:** Docker (recommended), or Python 3.12 + Node for a source
+  build; the engine uses the `openssl` CLI. PostgreSQL is recommended for
+  multi-user deployments; SQLite is fine for single-user or development.
+- **Quick start:** `docker compose up` — see `README_WEB.md` and
+  `docs/DEPLOYMENT_HOMELAB.md` / `docs/DEPLOYMENT_NGINX.md`.
+- **Authentication:** configure auth before exposing the app on a network. With
+  no auth configured it runs "open" (single anonymous admin) and will refuse to
+  start unless you explicitly opt into that mode.
+- **Reverse proxy:** serves cleanly behind a proxy, including under a subpath.
+- **Outbound safety:** because it fetches user-supplied URLs, it enforces an
+  SSRF policy by default — loopback, private, link-local, and cloud-metadata
+  targets are blocked; a lab mode can relax this for internal testing.
 
-This release incorporates a full security review and remediation:
+### Documentation
 
-- **SSRF** hardening — redirect re-validation on server-side fetches,
-  DNS-rebinding defeated by pinning connections to a validated IP, a worker-side
-  validating resolver covering the engine's subprocesses, and IPv4-mapped-IPv6
-  normalization so metadata/loopback can't be evaded (#28, #29, #39).
-- **Fail-closed by default** — the app refuses to start with no authentication
-  configured unless an operator explicitly opts into open mode (#30).
-- **API-token workspace-scope confinement** — a scoped token can no longer
-  reach other workspaces by omitting a parameter (#32).
-- **Dependency floors** raised past known CVEs (authlib, gunicorn,
-  python-multipart, requests, cryptography, starlette) (#31).
-- Authentication required on certificate inspection (#35); reverse-proxy header
-  trust tightened (#34); the `curl` argument-injection surface and the external
-  `curl` dependency removed in favor of the `requests` library (#36, #8).
-
-### Notable fixes
-
-- One-time database migration relaxes legacy global unique constraints to
-  per-workspace composites, so the same CA/profile can live in multiple
-  workspaces (uploads and sharing no longer fail).
-- Path-validation issuer/subject name-chaining now reports an unambiguous
-  verdict and surfaces both DNs (#24).
-- OCSP `producedAt` freshness only warns past 18 hours (#40).
-- Live results stream per test instead of per category (#1).
-- Saved-certificate view: parsed v3 extensions and a compact, scrollable PEM
-  (#25).
-- Profile and saved-certificate sharing into member/admin workspaces (#26, #27).
-
-### Verifying
-
-116 backend tests pass; the frontend builds clean.
+- `README_WEB.md` — overview and setup
+- `docs/API.md` — REST API reference
+- `docs/AUTH.md` — authentication and workspaces
+- `docs/DEPLOYMENT_HOMELAB.md`, `docs/DEPLOYMENT_NGINX.md` — deployment guides
+- `docs/SECURITY.md` — security model
