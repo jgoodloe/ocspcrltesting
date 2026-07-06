@@ -89,6 +89,72 @@ def _reconcile_existing_tables(conn: Connection) -> None:
         for index in table.indexes:
             index.create(bind=conn, checkfirst=True)
 
+    _reconcile_ca_cert_unique(conn)
+
+
+def _reconcile_ca_cert_unique(conn: Connection) -> None:
+    """Relax the pre-multi-user *global* unique on ``ca_certificates`` to the
+    per-workspace composite the model now declares.
+
+    Single-user databases created ``ca_certificates`` with
+    ``UNIQUE (fingerprint_sha256)``, which wrongly prevents the same CA from
+    being saved in more than one workspace (uploads and cross-workspace sharing
+    fail with an IntegrityError). Replace it with
+    ``UNIQUE (workspace_id, fingerprint_sha256)``. Idempotent; a no-op once the
+    composite is already in place. Runs after the column/index reconciliation
+    so the SQLite table rebuild can copy every current column.
+    """
+    inspector = inspect(conn)
+    if "ca_certificates" not in set(inspector.get_table_names()):
+        return
+
+    def cols(entry: dict) -> list:
+        return list(entry.get("column_names") or [])
+
+    uniques = inspector.get_unique_constraints("ca_certificates")
+    has_composite = any(set(cols(u)) == {"workspace_id", "fingerprint_sha256"} for u in uniques)
+    stale = [u for u in uniques if cols(u) == ["fingerprint_sha256"]]
+    if has_composite and not stale:
+        return  # already correct
+
+    if conn.dialect.name == "sqlite":
+        # SQLite cannot drop a table-level UNIQUE; rebuild the table. By now
+        # _reconcile_existing_tables has added every current column, so a plain
+        # column-list copy is safe.
+        table = Base.metadata.tables["ca_certificates"]
+        col_list = ", ".join(f'"{c.name}"' for c in table.columns)
+        conn.exec_driver_sql("ALTER TABLE ca_certificates RENAME TO _ca_certificates_old")
+        # Index names are database-global in SQLite and survive the rename, so
+        # drop the old table's named indexes before recreating the table (whose
+        # fresh indexes reuse the same names). Auto-indexes from the dropped
+        # UNIQUE go away with the old table.
+        for idx in inspect(conn).get_indexes("_ca_certificates_old"):
+            name = idx.get("name")
+            if name and not name.startswith("sqlite_autoindex"):
+                conn.exec_driver_sql(f'DROP INDEX IF EXISTS "{name}"')
+        table.create(bind=conn)
+        conn.exec_driver_sql(
+            f"INSERT INTO ca_certificates ({col_list}) "
+            f"SELECT {col_list} FROM _ca_certificates_old"
+        )
+        conn.exec_driver_sql("DROP TABLE _ca_certificates_old")
+        logger.info(
+            "rebuilt ca_certificates: replaced global fingerprint unique with the "
+            "per-workspace composite"
+        )
+        return
+
+    # PostgreSQL and other backends can alter constraints in place.
+    for u in stale:
+        conn.exec_driver_sql(f'ALTER TABLE ca_certificates DROP CONSTRAINT "{u["name"]}"')
+        logger.info("dropped stale global unique %s on ca_certificates", u["name"])
+    if not has_composite:
+        conn.exec_driver_sql(
+            "ALTER TABLE ca_certificates ADD CONSTRAINT uq_ca_certificates_ws_fingerprint "
+            "UNIQUE (workspace_id, fingerprint_sha256)"
+        )
+        logger.info("added composite unique on ca_certificates(workspace_id, fingerprint_sha256)")
+
 
 async def init_db() -> None:
     engine = get_engine()

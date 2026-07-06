@@ -32,13 +32,24 @@ def _build_legacy_db(db_path) -> None:
             "id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(120) NOT NULL, description TEXT, "
             "config_json TEXT NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)"
         )
+        # Faithful to the pre-multi-user schema: a GLOBAL unique on the
+        # fingerprint (later relaxed to a per-workspace composite).
         conn.exec_driver_sql(
             "CREATE TABLE ca_certificates ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(200) NOT NULL, pem TEXT NOT NULL, "
             "subject TEXT NOT NULL, issuer TEXT NOT NULL, serial_number TEXT NOT NULL, "
             "fingerprint_sha256 VARCHAR(64) NOT NULL, not_before DATETIME NOT NULL, "
             "not_after DATETIME NOT NULL, is_ca INTEGER NOT NULL, source VARCHAR(20) NOT NULL, "
-            "source_url TEXT, created_at DATETIME NOT NULL)"
+            "source_url TEXT, created_at DATETIME NOT NULL, "
+            "CONSTRAINT uq_ca_certificates_fingerprint UNIQUE (fingerprint_sha256))"
+        )
+        conn.exec_driver_sql(
+            "INSERT INTO ca_certificates "
+            "(name, pem, subject, issuer, serial_number, fingerprint_sha256, not_before, "
+            "not_after, is_ca, source, created_at) VALUES "
+            "('legacy-ca','-----BEGIN-----','CN=CA','CN=CA','1','deadbeef',"
+            "'2026-01-01T00:00:00+00:00','2030-01-01T00:00:00+00:00',1,'upload',"
+            "'2026-01-01T00:00:00+00:00')"
         )
         conn.exec_driver_sql(
             "INSERT INTO runs (id, ocsp_url, status, created_at, config_json, totals_json, last_seq) "
@@ -108,3 +119,40 @@ def test_legacy_db_boots_and_backfills(monkeypatch, tmp_path):
     assert run_ws is not None
     assert prof_ws is not None
     assert run_ws == prof_ws
+
+
+def test_legacy_ca_cert_global_unique_relaxed_to_composite(monkeypatch, tmp_path):
+    """The pre-multi-user global unique on ca_certificates.fingerprint_sha256 is
+    relaxed to (workspace_id, fingerprint_sha256) so the same CA can live in
+    more than one workspace — but duplicates within a workspace still fail."""
+    import pytest
+    from sqlalchemy import create_engine, text
+
+    _boot(monkeypatch, tmp_path)  # runs init_db (the reconciliation) once
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy.sqlite3'}")
+    try:
+        row = (
+            "INSERT INTO ca_certificates "
+            "(workspace_id, name, pem, subject, issuer, serial_number, fingerprint_sha256, "
+            "not_before, not_after, is_ca, source, created_at) VALUES "
+            "({ws}, 'c', 'p', 's', 'i', '1', 'sharedfp', "
+            "'2026-01-01T00:00:00+00:00', '2030-01-01T00:00:00+00:00', 1, 'upload', "
+            "'2026-01-01T00:00:00+00:00')"
+        )
+        # Same fingerprint in two different workspaces: now allowed.
+        with engine.begin() as conn:
+            conn.exec_driver_sql(row.format(ws=1))
+            conn.exec_driver_sql(row.format(ws=2))
+        # Duplicate within the same workspace: still rejected.
+        with pytest.raises(Exception):
+            with engine.begin() as conn:
+                conn.exec_driver_sql(row.format(ws=1))
+        # The legacy row survived the table rebuild.
+        with engine.begin() as conn:
+            n = conn.exec_driver_sql(
+                "SELECT COUNT(*) FROM ca_certificates WHERE fingerprint_sha256='deadbeef'"
+            ).scalar()
+        assert n == 1
+    finally:
+        engine.dispose()
