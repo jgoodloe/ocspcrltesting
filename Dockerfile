@@ -9,15 +9,12 @@ RUN npm run build
 # ---- Stage 2: Python runtime ------------------------------------------------
 FROM python:3.12-slim
 
-# The test engine shells out to the openssl CLI (monitor/path-validation) and
-# to curl (OCSP POST probes in monitor.py). python:slim ships openssl but NOT
-# curl, so install curl and verify both are present — otherwise those probes
-# fail at runtime with "No such file or directory: 'curl'".
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && openssl version \
-    && curl --version
+# The test engine shells out to the openssl CLI (monitor/path-validation).
+# python:slim ships it; this guard fails the build early if a future base
+# image drops it — in that case add `apt-get install -y openssl` here.
+# (OCSP POST probes use the requests library, not the curl binary, so curl is
+# intentionally NOT required at runtime.)
+RUN openssl version
 
 WORKDIR /app
 

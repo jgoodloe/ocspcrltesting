@@ -40,6 +40,57 @@ class OCSPMonitor:
     def log(self, text: str) -> None:
         """Log message using callback"""
         self.log_callback(text)
+
+    def _post_ocsp_via_requests(
+        self,
+        ocsp_url,
+        *,
+        data=None,
+        data_file=None,
+        content_type="application/ocsp-request",
+        output_file=None,
+        timeout=30,
+    ):
+        """POST an OCSP request using the requests library instead of shelling
+        out to the ``curl`` binary (which is not guaranteed to be present in the
+        runtime image, and previously failed the security probes with
+        ``FileNotFoundError: 'curl'``).
+
+        Returns an object mimicking the old ``curl -w '%{http_code}' -s``
+        subprocess result so call sites are unchanged: ``.returncode`` (0 on a
+        completed HTTP exchange), ``.stdout`` (the HTTP status code as text),
+        ``.stderr`` (error text on failure), plus ``.content``/``.status_code``.
+        When ``output_file`` is given the raw response body is written there,
+        matching the old ``curl -o`` behavior. In the worker this call is still
+        subject to the SSRF net-guard like every other requests call.
+        """
+        import requests
+        from types import SimpleNamespace
+
+        try:
+            if data is None and data_file is not None:
+                with open(data_file, "rb") as fh:
+                    data = fh.read()
+            resp = requests.post(
+                ocsp_url,
+                data=data or b"",
+                headers={"Content-Type": content_type},
+                timeout=timeout,
+            )
+            if output_file is not None:
+                with open(output_file, "wb") as fh:
+                    fh.write(resp.content)
+            return SimpleNamespace(
+                returncode=0,
+                stdout=str(resp.status_code),
+                stderr="",
+                content=resp.content,
+                status_code=resp.status_code,
+            )
+        except Exception as exc:  # network error, blocked target, timeout, ...
+            return SimpleNamespace(
+                returncode=1, stdout="", stderr=str(exc), content=b"", status_code=None
+            )
         
     def check_certificate_validity(self, cert_path: str) -> Tuple[bool, Optional[datetime], Optional[datetime]]:
         """Check certificate validity period using OpenSSL"""
@@ -2163,18 +2214,12 @@ ggEPADCCAQoCggEBAL{serial[:20]}...
                 test_result["error_details"].append(f"Failed to generate OCSP request: {req_result.stderr}")
                 return test_result
             
-            # Send POST request using curl
-            post_cmd = [
-                "curl", "-X", "POST",
-                "-H", "Content-Type: application/ocsp-request",
-                "--data-binary", f"@{request_file}",
-                "-w", "%{http_code}",
-                "-s", "-o", f"{request_file}.response",
-                "--url", ocsp_url
-            ]
-            
-            self.log(f"[HTTP-POST] POST command: {' '.join(post_cmd)}\n")
-            post_result = subprocess.run(post_cmd, capture_output=True, text=True, timeout=30)
+            # Send POST request (via requests; no external curl dependency)
+            self.log("[HTTP-POST] Sending OCSP POST via requests\n")
+            post_result = self._post_ocsp_via_requests(
+                ocsp_url, data_file=request_file,
+                output_file=f"{request_file}.response", timeout=30,
+            )
             
             test_result["response_received"] = post_result.returncode == 0
             
@@ -2285,18 +2330,12 @@ ggEPADCCAQoCggEBAL{serial[:20]}...
                 self.log(f"[HTTP-POST] Large request size: {request_size} bytes\n")
                 
                 if request_size > 255:  # Exceeds typical GET URL limit
-                    # Send large POST request
-                    post_cmd = [
-                        "curl", "-X", "POST",
-                        "-H", "Content-Type: application/ocsp-request",
-                        "--data-binary", f"@{request_file}",
-                        "-w", "%{http_code}",
-                        "-s", "-o", f"{request_file}.response",
-                        "--url", ocsp_url
-                    ]
-                    
+                    # Send large POST request (via requests; no curl dependency)
                     start_time = datetime.now()
-                    post_result = subprocess.run(post_cmd, capture_output=True, text=True, timeout=60)
+                    post_result = self._post_ocsp_via_requests(
+                        ocsp_url, data_file=request_file,
+                        output_file=f"{request_file}.response", timeout=60,
+                    )
                     end_time = datetime.now()
                     
                     response_time = (end_time - start_time).total_seconds()
@@ -2543,17 +2582,11 @@ ggEPADCCAQoCggEBAL{serial[:20]}...
             req_result = subprocess.run(req_cmd, capture_output=True, text=True, timeout=15)
             
             if req_result.returncode == 0:
-                # Send POST with specific Content-Type
-                post_cmd = [
-                    "curl", "-X", "POST",
-                    "-H", f"Content-Type: {content_type}",
-                    "--data-binary", f"@{request_file}",
-                    "-w", "%{http_code}",
-                    "-s", "-o", f"{request_file}.response",
-                    "--url", ocsp_url
-                ]
-                
-                post_result = subprocess.run(post_cmd, capture_output=True, text=True, timeout=30)
+                # Send POST with specific Content-Type (via requests; no curl)
+                post_result = self._post_ocsp_via_requests(
+                    ocsp_url, data_file=request_file, content_type=content_type,
+                    output_file=f"{request_file}.response", timeout=30,
+                )
                 
                 if post_result.returncode == 0:
                     http_code = post_result.stdout.strip()
@@ -2723,17 +2756,10 @@ ggEPADCCAQoCggEBAL{serial[:20]}...
             # Create malformed request data
             malformed_data = b"INVALID_OCSP_REQUEST_DATA"
             
-            # Send malformed POST request
-            post_cmd = [
-                "curl", "-X", "POST",
-                "-H", "Content-Type: application/ocsp-request",
-                "--data-binary", "@-",
-                "-w", "%{http_code}",
-                "-s",
-                "--url", ocsp_url
-            ]
-            
-            post_result = subprocess.run(post_cmd, input=malformed_data, capture_output=True, text=True, timeout=30)
+            # Send malformed POST request (via requests; no curl dependency)
+            post_result = self._post_ocsp_via_requests(
+                ocsp_url, data=malformed_data, timeout=30,
+            )
             
             if post_result.returncode == 0:
                 http_code = post_result.stdout.strip()
@@ -2775,17 +2801,10 @@ ggEPADCCAQoCggEBAL{serial[:20]}...
             # Create oversized request data (1MB)
             oversized_data = b"X" * (1024 * 1024)
             
-            # Send oversized POST request
-            post_cmd = [
-                "curl", "-X", "POST",
-                "-H", "Content-Type: application/ocsp-request",
-                "--data-binary", "@-",
-                "-w", "%{http_code}",
-                "-s",
-                "--url", ocsp_url
-            ]
-            
-            post_result = subprocess.run(post_cmd, input=oversized_data, capture_output=True, text=True, timeout=60)
+            # Send oversized POST request (via requests; no curl dependency)
+            post_result = self._post_ocsp_via_requests(
+                ocsp_url, data=oversized_data, timeout=60,
+            )
             
             if post_result.returncode == 0:
                 http_code = post_result.stdout.strip()
@@ -5243,16 +5262,7 @@ ggEPADCCAQoCggEBAL{str(uuid4().hex)[:20]}...
             
             # Try using curl first, fallback to requests if curl is not available
             try:
-                post_cmd = [
-                    "curl", "-X", "POST",
-                    "-H", "Content-Type: application/ocsp-request",
-                    "--data-binary", "@-",
-                    "-w", "%{http_code}",
-                    "-s",
-                    "--url", ocsp_url
-                ]
-                
-                result = subprocess.run(post_cmd, input=malformed_data, capture_output=True, text=True, timeout=30)
+                result = self._post_ocsp_via_requests(ocsp_url, data=malformed_data, timeout=30)
                 
                 if result.returncode == 0:
                     http_code = result.stdout.strip()
@@ -5610,17 +5620,12 @@ ggEPADCCAQoCggEBAL{str(uuid4().hex)[:20]}...
             req_result = subprocess.run(req_cmd, capture_output=True, text=True, timeout=15)
             
             if req_result.returncode == 0:
-                # Send unsigned request
-                post_cmd = [
-                    "curl", "-X", "POST",
-                    "-H", "Content-Type: application/ocsp-request",
-                    "--data-binary", f"@{request_file}",
-                    "-w", "%{http_code}",
-                    "-s",
-                    "--url", ocsp_url
-                ]
-                
-                post_result = subprocess.run(post_cmd, capture_output=True, text=True, timeout=30)
+                # Send unsigned request (via requests; no curl dependency). Write
+                # the response so the sigRequired-extension check below can run.
+                post_result = self._post_ocsp_via_requests(
+                    ocsp_url, data_file=request_file,
+                    output_file=f"{request_file}.response", timeout=30,
+                )
                 
                 if post_result.returncode == 0:
                     http_code = post_result.stdout.strip()
