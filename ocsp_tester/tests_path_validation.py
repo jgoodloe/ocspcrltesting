@@ -37,7 +37,7 @@ from cryptography.x509.oid import NameOID, ExtensionOID, CertificatePoliciesOID
 # generous runaway guard — cycles are detected explicitly, not via the cap.
 MAX_CHAIN_DEPTH = 8
 
-from .models import TestCaseResult, TestStatus
+from .models import TestCaseResult, TestStatus, result_sink
 from .ocsp_client import send_ocsp_request, OCSPRequestSpec
 from .path_validator import CertificatePathValidator, ValidationResult
 from .selection import should_run
@@ -66,8 +66,9 @@ class PathValidationContext:
 class PathValidationTestSuite:
     """Main test suite for certificate path validation"""
     
-    def __init__(self, log_callback=None):
-        self.test_results: List[TestCaseResult] = []
+    def __init__(self, log_callback=None, on_result=None):
+        # on_result (optional) streams each result as it is appended.
+        self.test_results: List[TestCaseResult] = result_sink(on_result)
         self.log_callback = log_callback
         self.temp_files: List[str] = []
         # AIA download cache: cross-certified bridge topologies reference the
@@ -1844,16 +1845,18 @@ def _log_debug(message: str, log_callback=None) -> None:
         log_callback(f"[DEBUG] {message}\n")
 
 
-def run_path_validation_tests(test_inputs: Dict[str, Any], log_callback=None) -> List[TestCaseResult]:
+def run_path_validation_tests(test_inputs: Dict[str, Any], log_callback=None, on_result=None) -> List[TestCaseResult]:
     """
     Main entry point for running certificate path validation tests
-    
+
     Args:
         test_inputs: Dictionary containing test configuration and certificate paths
         log_callback: Optional callback function for logging messages to GUI
-        
+        on_result: Optional callback invoked with each result as it completes
+            (lets the worker stream per test); omit for a plain returned list.
+
     Returns:
         List of TestCaseResult objects containing test outcomes
     """
-    test_suite = PathValidationTestSuite(log_callback=log_callback)
+    test_suite = PathValidationTestSuite(log_callback=log_callback, on_result=on_result)
     return test_suite.run_all_path_validation_tests(test_inputs)

@@ -13,7 +13,7 @@ import tempfile
 import uuid
 from typing import Any, Callable, List, Optional
 
-from .models import TestCaseResult, TestStatus
+from .models import TestCaseResult, TestStatus, result_sink
 from .monitor import OCSPMonitor
 from .selection import should_run, any_selected
 
@@ -51,8 +51,9 @@ def run_federal_tests(
     responder_cert_path: Optional[str] = None,
     config: Optional[Any] = None,
     log_callback: Optional[Callable[[str], None]] = None,
+    on_result=None,
 ) -> List[TestCaseResult]:
-    results: List[TestCaseResult] = []
+    results = result_sink(on_result)
     log = log_callback or (lambda _msg: None)
     monitor = OCSPMonitor(log_callback=log, config=config)
 

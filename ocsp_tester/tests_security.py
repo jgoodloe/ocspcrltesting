@@ -6,7 +6,7 @@ from typing import Any, Callable, List, Optional
 import requests
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
-from .models import TestCaseResult, TestStatus
+from .models import TestCaseResult, TestStatus, result_sink
 from .ocsp_client import send_ocsp_request, OCSPRequestSpec, _build_request
 from cryptography.hazmat.primitives import hashes
 from .monitor import OCSPMonitor
@@ -21,8 +21,9 @@ def run_security_tests(
     client_sign_key: Optional[str],
     config: Optional[Any] = None,
     log_callback: Optional[Callable[[str], None]] = None,
+    on_result=None,
 ) -> List[TestCaseResult]:
-    results: List[TestCaseResult] = []
+    results = result_sink(on_result)
 
     def _log(message: str) -> None:
         if log_callback:

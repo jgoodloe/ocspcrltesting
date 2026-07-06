@@ -17,7 +17,7 @@ from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional
 
 from ocsp_tester import ocsp_client, selection
-from ocsp_tester.models import TestCaseResult, TestStatus
+from ocsp_tester.models import TestCaseResult, TestStatus, result_sink
 from ocsp_tester.runner import _load_cert
 from ocsp_tester.tests_crl import run_crl_tests
 from ocsp_tester.tests_crl_comprehensive import run_crl_tests as run_crl_comprehensive_tests
@@ -122,6 +122,20 @@ class RunExecutor:
             payload = enrich_result(serialize_result(r), self.config)
             self._collect_latencies(payload)
             self.emit("result", {"result": payload})
+
+    def _stream_result(self, r: TestCaseResult) -> None:
+        """Emit a single result the moment the engine produces it (wired as the
+        ``on_result`` callback), so the UI fills in per test rather than per
+        category. Applies the same selection backstop and per-result diagnostics
+        attachment the category-level path used to do."""
+        # Backstop: engine modules already guard with should_run, but if one
+        # misses a guard, honor the active selection here too.
+        if not selection.should_run(r.name):
+            return
+        self._attach_diagnostics([r], diagnostics.records())
+        payload = enrich_result(serialize_result(r), self.config)
+        self._collect_latencies(payload)
+        self.emit("result", {"result": payload})
 
     def _attach_diagnostics(self, results: List[TestCaseResult], records: List[Dict[str, Any]]) -> None:
         """Attach recorded HTTP exchanges / commands to the test result whose
@@ -229,9 +243,15 @@ class RunExecutor:
         engine_cfg = self._engine_config()
         crl_urls: List[str] = cfg.get("crl_urls", [])
 
+        # Each result is emitted the instant the engine produces it, so the live
+        # Run page fills in per test rather than in per-category batches.
+        on_result = self._stream_result
+
         runners: Dict[str, Callable[[], List[TestCaseResult]]] = {
-            "protocol": lambda: run_protocol_tests(ocsp_url, issuer, sample),
-            "status": lambda: run_status_tests(ocsp_url, issuer, good, revoked, unknown_ca),
+            "protocol": lambda: run_protocol_tests(ocsp_url, issuer, sample, on_result=on_result),
+            "status": lambda: run_status_tests(
+                ocsp_url, issuer, good, revoked, unknown_ca, on_result=on_result
+            ),
             "security": lambda: run_security_tests(
                 ocsp_url,
                 issuer,
@@ -240,6 +260,7 @@ class RunExecutor:
                 self.files.get("client_key"),
                 engine_cfg,
                 log_callback=self._engine_log,
+                on_result=on_result,
             ),
             "performance": lambda: run_perf_tests(
                 ocsp_url,
@@ -249,21 +270,24 @@ class RunExecutor:
                 bool(cfg.get("enable_load_test", False)),
                 int(cfg.get("load_concurrency", 5)),
                 int(cfg.get("load_requests", 50)),
+                on_result=on_result,
             ),
             "crl": lambda: (
-                run_crl_tests(ocsp_url, issuer, good, revoked)
+                run_crl_tests(ocsp_url, issuer, good, revoked, on_result=on_result)
                 + run_crl_comprehensive_tests(
-                    ocsp_url, issuer, good, revoked, crl_urls[0] if crl_urls else None
+                    ocsp_url, issuer, good, revoked, crl_urls[0] if crl_urls else None,
+                    on_result=on_result,
                 )
-                + self._explicit_crl_tests(crl_urls)
+                + self._explicit_crl_tests(crl_urls, on_result=on_result)
             ),
-            "ikev2": run_ikev2_tests,
+            "ikev2": lambda: run_ikev2_tests(on_result=on_result),
             "federal": lambda: run_federal_tests(
                 ocsp_url,
                 issuer_path,
                 self.files.get("good_cert") or self.files.get("revoked_cert"),
                 config=engine_cfg,
                 log_callback=self._engine_log,
+                on_result=on_result,
             ),
             "path_validation": lambda: run_path_validation_tests(
                 {
@@ -279,7 +303,8 @@ class RunExecutor:
                     "trust_anchor_type": cfg.get("trust_anchor_type", "root"),
                     "require_explicit_policy": cfg.get("require_explicit_policy", False),
                     "inhibit_policy_mapping": cfg.get("inhibit_policy_mapping", False),
-                }
+                },
+                on_result=on_result,
             ),
         }
 
@@ -301,24 +326,22 @@ class RunExecutor:
             if selection_map is not None and key in selection_map:
                 selected = [str(n) for n in selection_map[key]]
                 self.log("INFO", f"{label}: restricted to {len(selected)} selected test(s)")
-            records_before = len(diagnostics.records())
             selection.set_active(selected)
             try:
-                results = runners[key]()
+                # Results stream as the engine produces them via on_result
+                # (_stream_result), which applies diagnostics + the selection
+                # backstop per result — so nothing is emitted here on success.
+                runners[key]()
             except RunCancelled:
                 raise
             except Exception as exc:  # keep the run going; surface as ERROR result
                 self.log("ERROR", f"{label} crashed: {exc}")
                 self.log("DEBUG", traceback.format_exc())
-                results = [self._error_result(CATEGORY_LABELS[key].split(" tests")[0], f"Run {label}", str(exc))]
+                self._emit_results(
+                    [self._error_result(CATEGORY_LABELS[key].split(" tests")[0], f"Run {label}", str(exc))]
+                )
             finally:
                 selection.set_active(None)
-            if selected is not None:
-                # Safety net in case an engine module misses a guard.
-                selected_set = set(selected)
-                results = [r for r in results if selection.matches(r.name, selected_set)]
-            self._attach_diagnostics(results, diagnostics.records()[records_before:])
-            self._emit_results(results)
             done += 1
             self.emit(
                 "progress",
@@ -333,12 +356,12 @@ class RunExecutor:
         self.emit("done", {"status": "completed", "latency": self.latency_summary()})
         self.log("INFO", "Run complete")
 
-    def _explicit_crl_tests(self, crl_urls: List[str]) -> List[TestCaseResult]:
+    def _explicit_crl_tests(self, crl_urls: List[str], on_result=None) -> List[TestCaseResult]:
         """Fetch/parse checks for each explicitly supplied CRL URL."""
         import requests
         from cryptography import x509 as cx509
 
-        results: List[TestCaseResult] = []
+        results = result_sink(on_result)
         for url in crl_urls:
             name = f"Fetch and parse CRL: {url}"
             if not selection.should_run(name):

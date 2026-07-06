@@ -5,7 +5,7 @@ from typing import List
 
 from cryptography import x509
 
-from .models import TestCaseResult, TestStatus
+from .models import TestCaseResult, TestStatus, result_sink
 from .ocsp_client import send_ocsp_request, OCSPRequestSpec
 from .selection import should_run
 
@@ -18,8 +18,9 @@ def run_perf_tests(
     enable_load: bool,
     load_concurrency: int,
     load_requests: int,
+    on_result=None,
 ) -> List[TestCaseResult]:
-    results: List[TestCaseResult] = []
+    results = result_sink(on_result)
 
     # 1. Latency baseline
     if should_run("Latency baseline"):

@@ -2,7 +2,7 @@ import uuid
 from typing import List, Optional
 
 from cryptography import x509
-from .models import TestCaseResult, TestStatus
+from .models import TestCaseResult, TestStatus, result_sink
 from .ocsp_client import send_ocsp_request, OCSPRequestSpec
 from .selection import should_run
 
@@ -13,8 +13,9 @@ def run_status_tests(
     good_cert: Optional[x509.Certificate],
     revoked_cert: Optional[x509.Certificate],
     unknown_ca_cert: Optional[x509.Certificate],
+    on_result=None,
 ) -> List[TestCaseResult]:
-    results: List[TestCaseResult] = []
+    results = result_sink(on_result)
 
     # 1. Valid certificate status
     if should_run("Known valid certificate returns good"):

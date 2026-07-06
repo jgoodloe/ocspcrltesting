@@ -5,7 +5,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.exceptions import InvalidSignature
 
-from .models import TestCaseResult, TestStatus
+from .models import TestCaseResult, TestStatus, result_sink
 from .ocsp_client import send_ocsp_request, OCSPRequestSpec
 from .selection import should_run
 
@@ -15,9 +15,10 @@ def run_crl_tests(
     issuer: x509.Certificate,
     good_cert: Optional[x509.Certificate],
     revoked_cert: Optional[x509.Certificate],
+    on_result=None,
 ) -> List[TestCaseResult]:
     """Run CRL signature validation tests as mentioned in FutureFeatures.txt"""
-    results: List[TestCaseResult] = []
+    results = result_sink(on_result)
 
     # Test 1: Verify OCSP response signature using issuer certificate
     if should_run("OCSP response signature validation"):

@@ -5,13 +5,17 @@ from typing import List
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization, hashes
 
-from .models import TestCaseResult, TestStatus
+from .models import TestCaseResult, TestStatus, result_sink
 from .ocsp_client import send_ocsp_request, OCSPRequestSpec
 from .selection import should_run
 
 
-def run_protocol_tests(ocsp_url: str, issuer: x509.Certificate, leaf: x509.Certificate) -> List[TestCaseResult]:
-    results: List[TestCaseResult] = []
+def run_protocol_tests(
+    ocsp_url: str, issuer: x509.Certificate, leaf: x509.Certificate, on_result=None
+) -> List[TestCaseResult]:
+    # on_result (optional) is called as each result is appended, so the worker
+    # can stream per test; omit it and this behaves as a plain list.
+    results = result_sink(on_result)
 
     # 1. HTTP GET
     if should_run("HTTP GET transport"):

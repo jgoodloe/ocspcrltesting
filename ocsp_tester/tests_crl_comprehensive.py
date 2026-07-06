@@ -7,7 +7,7 @@ from datetime import datetime
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 
-from .models import TestCaseResult, TestStatus
+from .models import TestCaseResult, TestStatus, result_sink
 from .ocsp_client import send_ocsp_request, OCSPRequestSpec
 from .selection import should_run
 
@@ -18,9 +18,10 @@ def run_crl_tests(
     good_cert: Optional[x509.Certificate],
     revoked_cert: Optional[x509.Certificate],
     crl_override_url: Optional[str] = None,
+    on_result=None,
 ) -> List[TestCaseResult]:
     """Run comprehensive CRL testing"""
-    results: List[TestCaseResult] = []
+    results = result_sink(on_result)
 
     # Test 1: CRL Distribution Point extraction from certificate
     if should_run("CRL Distribution Point extraction from certificate"):

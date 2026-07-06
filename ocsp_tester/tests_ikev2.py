@@ -1,11 +1,11 @@
 import uuid
 from typing import List
-from .models import TestCaseResult, TestStatus
+from .models import TestCaseResult, TestStatus, result_sink
 from .selection import should_run
 
 
-def run_ikev2_tests() -> List[TestCaseResult]:
-    results: List[TestCaseResult] = []
+def run_ikev2_tests(on_result=None) -> List[TestCaseResult]:
+    results = result_sink(on_result)
 
     if should_run("OCSP Content extension (type 14) support"):
         r = TestCaseResult(id=str(uuid.uuid4()), category="IKEv2", name="OCSP Content extension (type 14) support", status=TestStatus.SKIP)
