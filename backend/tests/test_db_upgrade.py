@@ -27,10 +27,12 @@ def _build_legacy_db(db_path) -> None:
             "config_json TEXT NOT NULL, error TEXT, current_activity TEXT, "
             "totals_json TEXT NOT NULL, latency_json TEXT, last_seq INTEGER NOT NULL)"
         )
+        # Faithful to the pre-multi-user schema: a GLOBAL unique on name.
         conn.exec_driver_sql(
             "CREATE TABLE profiles ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(120) NOT NULL, description TEXT, "
-            "config_json TEXT NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)"
+            "config_json TEXT NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, "
+            "CONSTRAINT uq_profiles_name UNIQUE (name))"
         )
         # Faithful to the pre-multi-user schema: a GLOBAL unique on the
         # fingerprint (later relaxed to a per-workspace composite).
@@ -152,6 +154,38 @@ def test_legacy_ca_cert_global_unique_relaxed_to_composite(monkeypatch, tmp_path
         with engine.begin() as conn:
             n = conn.exec_driver_sql(
                 "SELECT COUNT(*) FROM ca_certificates WHERE fingerprint_sha256='deadbeef'"
+            ).scalar()
+        assert n == 1
+    finally:
+        engine.dispose()
+
+
+def test_legacy_profile_global_name_unique_relaxed_to_composite(monkeypatch, tmp_path):
+    """The pre-multi-user global unique on profiles.name is relaxed to
+    (workspace_id, name) so the same profile name can exist in more than one
+    workspace (this is what profile sharing relies on)."""
+    import pytest
+    from sqlalchemy import create_engine
+
+    _boot(monkeypatch, tmp_path)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy.sqlite3'}")
+    try:
+        row = (
+            "INSERT INTO profiles (workspace_id, name, config_json, created_at, updated_at) "
+            "VALUES ({ws}, 'Shared Name', '{{}}', '2026-01-01T00:00:00+00:00', "
+            "'2026-01-01T00:00:00+00:00')"
+        )
+        with engine.begin() as conn:
+            conn.exec_driver_sql(row.format(ws=1))
+            conn.exec_driver_sql(row.format(ws=2))  # same name, different workspace: allowed
+        with pytest.raises(Exception):
+            with engine.begin() as conn:
+                conn.exec_driver_sql(row.format(ws=1))  # duplicate within a workspace: rejected
+        # The legacy profile survived the rebuild.
+        with engine.begin() as conn:
+            n = conn.exec_driver_sql(
+                "SELECT COUNT(*) FROM profiles WHERE name='legacy-profile'"
             ).scalar()
         assert n == 1
     finally:
