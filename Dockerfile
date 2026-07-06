@@ -40,4 +40,8 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
 
 # Single worker by default: run supervision and live-stream wakeups are
 # per-process; streams still work across workers (DB-backed) if you raise this.
-CMD ["sh", "-c", "exec gunicorn backend.app.main:app -k uvicorn.workers.UvicornWorker -w ${GUNICORN_WORKERS:-1} -b 0.0.0.0:8000 --timeout 120 --graceful-timeout 30 --forwarded-allow-ips '*'"]
+# --forwarded-allow-ips defaults to the loopback proxy only. Set
+# OCSPWEB_FORWARDED_ALLOW_IPS to the reverse proxy's address/subnet (never '*',
+# which trusts spoofable X-Forwarded-* from any client and defeats login
+# rate-limiting and audit attribution).
+CMD ["sh", "-c", "exec gunicorn backend.app.main:app -k uvicorn.workers.UvicornWorker -w ${GUNICORN_WORKERS:-1} -b 0.0.0.0:8000 --timeout 120 --graceful-timeout 30 --forwarded-allow-ips \"${OCSPWEB_FORWARDED_ALLOW_IPS:-127.0.0.1}\""]

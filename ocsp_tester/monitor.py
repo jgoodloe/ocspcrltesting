@@ -2170,7 +2170,7 @@ ggEPADCCAQoCggEBAL{serial[:20]}...
                 "--data-binary", f"@{request_file}",
                 "-w", "%{http_code}",
                 "-s", "-o", f"{request_file}.response",
-                ocsp_url
+                "--url", ocsp_url
             ]
             
             self.log(f"[HTTP-POST] POST command: {' '.join(post_cmd)}\n")
@@ -2292,7 +2292,7 @@ ggEPADCCAQoCggEBAL{serial[:20]}...
                         "--data-binary", f"@{request_file}",
                         "-w", "%{http_code}",
                         "-s", "-o", f"{request_file}.response",
-                        ocsp_url
+                        "--url", ocsp_url
                     ]
                     
                     start_time = datetime.now()
@@ -2550,7 +2550,7 @@ ggEPADCCAQoCggEBAL{serial[:20]}...
                     "--data-binary", f"@{request_file}",
                     "-w", "%{http_code}",
                     "-s", "-o", f"{request_file}.response",
-                    ocsp_url
+                    "--url", ocsp_url
                 ]
                 
                 post_result = subprocess.run(post_cmd, capture_output=True, text=True, timeout=30)
@@ -2730,7 +2730,7 @@ ggEPADCCAQoCggEBAL{serial[:20]}...
                 "--data-binary", "@-",
                 "-w", "%{http_code}",
                 "-s",
-                ocsp_url
+                "--url", ocsp_url
             ]
             
             post_result = subprocess.run(post_cmd, input=malformed_data, capture_output=True, text=True, timeout=30)
@@ -2782,7 +2782,7 @@ ggEPADCCAQoCggEBAL{serial[:20]}...
                 "--data-binary", "@-",
                 "-w", "%{http_code}",
                 "-s",
-                ocsp_url
+                "--url", ocsp_url
             ]
             
             post_result = subprocess.run(post_cmd, input=oversized_data, capture_output=True, text=True, timeout=60)
@@ -5249,7 +5249,7 @@ ggEPADCCAQoCggEBAL{str(uuid4().hex)[:20]}...
                     "--data-binary", "@-",
                     "-w", "%{http_code}",
                     "-s",
-                    ocsp_url
+                    "--url", ocsp_url
                 ]
                 
                 result = subprocess.run(post_cmd, input=malformed_data, capture_output=True, text=True, timeout=30)
@@ -5617,7 +5617,7 @@ ggEPADCCAQoCggEBAL{str(uuid4().hex)[:20]}...
                     "--data-binary", f"@{request_file}",
                     "-w", "%{http_code}",
                     "-s",
-                    ocsp_url
+                    "--url", ocsp_url
                 ]
                 
                 post_result = subprocess.run(post_cmd, capture_output=True, text=True, timeout=30)

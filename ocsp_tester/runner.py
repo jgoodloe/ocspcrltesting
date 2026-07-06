@@ -2,6 +2,7 @@ import os
 import uuid
 from dataclasses import dataclass
 from typing import List, Optional, Any
+from urllib.parse import urlparse
 
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
@@ -81,6 +82,17 @@ class TestRunner:
         if not inputs.ocsp_url or not inputs.ocsp_url.strip():
             self._log("[DEBUG] Input validation failed - OCSP URL is empty\n")
             r = TestCaseResult(id=str(uuid.uuid4()), category="Setup", name="Validate inputs", status=TestStatus.ERROR, message="OCSP URL is required")
+            r.end()
+            return [r]
+
+        # Enforce an http(s) scheme at the engine boundary. Besides rejecting
+        # unsupported schemes, this guarantees the URL cannot begin with '-' and
+        # so can never be reinterpreted as an option by the curl/openssl
+        # subprocesses the engine shells out to (defense in depth; the web layer
+        # validates this too).
+        if urlparse(inputs.ocsp_url.strip()).scheme not in ("http", "https"):
+            self._log("[DEBUG] Input validation failed - OCSP URL scheme is not http(s)\n")
+            r = TestCaseResult(id=str(uuid.uuid4()), category="Setup", name="Validate inputs", status=TestStatus.ERROR, message="OCSP URL must be an http(s) URL")
             r.end()
             return [r]
         

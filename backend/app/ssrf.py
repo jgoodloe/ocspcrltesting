@@ -14,8 +14,8 @@ import ipaddress
 import logging
 import socket
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Tuple
-from urllib.parse import urlparse
+from typing import Callable, Iterable, List, Optional, Tuple
+from urllib.parse import urlparse, urlunparse
 
 logger = logging.getLogger("ocspweb.ssrf")
 
@@ -54,8 +54,23 @@ class NetworkPolicy:
         )
 
 
+def _normalize(ip: ipaddress._BaseAddress) -> ipaddress._BaseAddress:
+    """Collapse an IPv4-mapped IPv6 address (``::ffff:169.254.169.254``) to its
+    IPv4 form so classification cannot be evaded by the mapped spelling. On a
+    dual-stack host the kernel routes the mapped form to the IPv4 destination,
+    so it must be judged as that IPv4 address."""
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return ip.ipv4_mapped
+    return ip
+
+
+def _is_metadata(ip: ipaddress._BaseAddress) -> bool:
+    return str(_normalize(ip)) in METADATA_ADDRESSES
+
+
 def _classify_ip(ip: ipaddress._BaseAddress) -> Optional[str]:
     """Return a block reason for the address, or None if publicly routable."""
+    ip = _normalize(ip)
     if str(ip) in METADATA_ADDRESSES:
         return "cloud metadata service address"
     if ip.is_loopback:
@@ -66,6 +81,20 @@ def _classify_ip(ip: ipaddress._BaseAddress) -> Optional[str]:
         return "private network address (RFC1918/ULA)"
     if ip.is_unspecified or ip.is_multicast or ip.is_reserved:
         return "non-unicast or reserved address"
+    return None
+
+
+def address_block_reason(ip: ipaddress._BaseAddress, policy: NetworkPolicy) -> Optional[str]:
+    """Reason this address violates ``policy``, or None if it may be contacted.
+    Metadata endpoints stay blocked even in lab mode; other private/loopback
+    ranges are permitted only when ``allow_private`` is set."""
+    reason = _classify_ip(ip)
+    if reason is None:
+        return None
+    if _is_metadata(ip):
+        return reason  # never reachable, even in lab mode
+    if not policy.allow_private:
+        return reason
     return None
 
 
@@ -85,8 +114,15 @@ def resolve_host(host: str) -> List[ipaddress._BaseAddress]:
     return addresses
 
 
-def validate_url(url: str, policy: NetworkPolicy) -> None:
-    """Raise BlockedTargetError when the URL violates policy. Logs every block."""
+def resolve_and_validate(url: str, policy: NetworkPolicy) -> List[str]:
+    """Validate ``url`` against ``policy`` and return the resolved IP strings
+    that passed (so a caller can *pin* the connection to one of them and defeat
+    DNS rebinding). Raises BlockedTargetError on any violation.
+
+    Returns an empty list for the lab-mode ``localhost`` shortcut (the caller
+    then connects normally); every other host must resolve to at least one
+    allowed address.
+    """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         _block(url, f"unsupported scheme '{parsed.scheme}' (unix sockets/file/ftp are not allowed)")
@@ -99,18 +135,21 @@ def validate_url(url: str, policy: NetworkPolicy) -> None:
     if host_l == "localhost" or host_l.endswith(".localhost"):
         if not policy.allow_private:
             _block(url, "localhost is blocked by policy")
-        return  # explicitly allowed in lab mode
+        return []  # explicitly allowed in lab mode; connect normally
 
     # Literal IP or DNS name: every resolved address must pass the policy.
+    allowed: List[str] = []
     for ip in resolve_host(host):
-        reason = _classify_ip(ip)
-        if reason is None:
-            continue
-        # Metadata endpoints stay blocked even in lab mode.
-        if str(ip) in METADATA_ADDRESSES:
+        reason = address_block_reason(ip, policy)
+        if reason is not None:
             _block(url, f"{ip}: {reason}")
-        if not policy.allow_private:
-            _block(url, f"{ip}: {reason}")
+        allowed.append(str(_normalize(ip)))
+    return allowed
+
+
+def validate_url(url: str, policy: NetworkPolicy) -> None:
+    """Raise BlockedTargetError when the URL violates policy. Logs every block."""
+    resolve_and_validate(url, policy)
 
 
 def _block(url: str, reason: str) -> None:
@@ -121,6 +160,52 @@ def _block(url: str, reason: str) -> None:
 def validate_urls(urls: Iterable[str], policy: NetworkPolicy) -> None:
     for url in urls:
         validate_url(url, policy)
+
+
+_resolver_installed = False
+
+
+def install_pinning_resolver(
+    policy: NetworkPolicy, log: Optional[Callable[[str, str], None]] = None
+) -> None:
+    """Replace ``socket.getaddrinfo`` process-wide with one that drops any
+    address the policy forbids.
+
+    Because the connection can only ever be handed policy-approved addresses,
+    this closes the validate-then-reconnect DNS-rebinding gap uniformly for
+    *every* outbound client in the process — ``requests``, and the ``curl`` /
+    ``openssl`` subprocesses the engine shells out to (a second resolution at
+    connect time is validated exactly like the first). Intended for the
+    single-purpose per-run worker subprocess only; never install this in the
+    API server, whose threads serve unrelated traffic.
+    """
+    global _resolver_installed
+    if _resolver_installed:
+        return
+    _resolver_installed = True
+
+    original = socket.getaddrinfo
+
+    def guarded_getaddrinfo(host, *args, **kwargs):
+        results = original(host, *args, **kwargs)
+        allowed = []
+        for res in results:
+            raw = res[4][0]
+            try:
+                addr = ipaddress.ip_address(raw)
+            except ValueError:
+                allowed.append(res)
+                continue
+            reason = address_block_reason(addr, policy)
+            if reason is None:
+                allowed.append(res)
+            elif log:
+                log("WARN", f"[NETGUARD] blocked resolved address {raw} for {host!r}: {reason}")
+        if not allowed:
+            raise socket.gaierror(f"all addresses for {host!r} are blocked by the SSRF policy")
+        return allowed
+
+    socket.getaddrinfo = guarded_getaddrinfo  # type: ignore[assignment]
 
 
 def guarded_fetch(
@@ -144,8 +229,24 @@ def guarded_fetch(
 
     current = url
     for _ in range(max_redirects + 1):
-        validate_url(current, policy)
-        response = requests.get(current, timeout=timeout, stream=True, allow_redirects=False)
+        allowed = resolve_and_validate(current, policy)
+        # Pin the connection to a validated IP so a rebinding DNS server cannot
+        # swap in an internal address between validation and connect. For http
+        # we connect to the IP and carry the original Host header; for https we
+        # keep the hostname (TLS verification of the presented certificate is
+        # itself the pin — a rebind to an internal host fails cert validation).
+        parsed = urlparse(current)
+        connect_url, headers = current, {}
+        if allowed and parsed.scheme == "http":
+            ip = allowed[0]
+            netloc = f"[{ip}]" if ":" in ip else ip
+            if parsed.port:
+                netloc += f":{parsed.port}"
+            connect_url = urlunparse(parsed._replace(netloc=netloc))
+            headers["Host"] = parsed.netloc
+        response = requests.get(
+            connect_url, headers=headers, timeout=timeout, stream=True, allow_redirects=False
+        )
         try:
             if response.is_redirect:
                 location = response.headers.get("Location")

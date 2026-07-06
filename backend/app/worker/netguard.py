@@ -16,7 +16,12 @@ from typing import Callable, Optional
 
 import requests
 
-from ..ssrf import BlockedTargetError, NetworkPolicy, validate_url
+from ..ssrf import (
+    BlockedTargetError,
+    NetworkPolicy,
+    install_pinning_resolver,
+    validate_url,
+)
 
 _installed = False
 
@@ -30,6 +35,11 @@ def install(policy: NetworkPolicy, log: Optional[Callable[[str, str], None]] = N
     if _installed:
         return
     _installed = True
+
+    # Validate at DNS-resolution time too, so the address the socket actually
+    # connects to is policy-approved — this closes the DNS-rebinding gap for
+    # requests *and* for the curl/openssl subprocesses the engine shells out to.
+    install_pinning_resolver(policy, log)
 
     original_send = requests.Session.send
 

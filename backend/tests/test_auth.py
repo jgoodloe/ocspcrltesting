@@ -62,6 +62,13 @@ def test_auth_required_when_configured(auth_env):
     # No session -> protected endpoints are 401.
     assert auth_env.get("/api/test-runs").status_code == 401
     assert auth_env.get("/api/profiles").status_code == 401
+    # Certificate inspection also requires auth (issue #35).
+    assert (
+        auth_env.post(
+            "/api/certificates/inspect", files={"file": ("x.pem", b"not-a-cert")}
+        ).status_code
+        == 401
+    )
     # Public endpoints stay open.
     assert auth_env.get("/api/health").status_code == 200
     cfg = auth_env.get("/api/auth/config").json()

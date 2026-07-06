@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 
+from ..authz import Principal, current_principal
 from ..certs import CertificateError, extract_metadata, load_certificate
 from ..schemas import CertMetadata
 from ..settings import get_settings
@@ -22,7 +23,10 @@ async def read_limited_upload(file: UploadFile) -> bytes:
 
 
 @router.post("/certificates/inspect", response_model=CertMetadata)
-async def inspect_certificate(file: UploadFile) -> CertMetadata:
+async def inspect_certificate(
+    file: UploadFile,
+    _: Principal = Depends(current_principal),
+) -> CertMetadata:
     data = await read_limited_upload(file)
     try:
         cert = load_certificate(data)
