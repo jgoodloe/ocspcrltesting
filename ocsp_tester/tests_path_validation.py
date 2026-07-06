@@ -371,27 +371,61 @@ class PathValidationTestSuite:
         
         if should_run(test_name):
             try:
-                result = self._test_issuer_subject_mismatch(test_inputs)
-                status = TestStatus.FAIL if result else TestStatus.PASS
-            
+                analysis = self._test_issuer_subject_mismatch(test_inputs)
+
+                # Surface both DNs so the relationship can be verified by hand,
+                # and report an unambiguous verdict: PASS when the names chain
+                # (child issuer DN == parent subject DN), FAIL when a genuine
+                # mismatch is detected, SKIP when the certs were unavailable.
+                name_chaining = {
+                    "child_subject": analysis.get("child_subject"),
+                    "child_issuer": analysis.get("child_issuer"),
+                    "parent_subject": analysis.get("parent_subject"),
+                    "parent_issuer": analysis.get("parent_issuer"),
+                    "child_issuer_matches_parent_subject": analysis.get("names_chain"),
+                }
+                if not analysis.get("available"):
+                    status = TestStatus.SKIP
+                    actual_result = "SKIP"
+                    message = (
+                        "Issuer/Subject name chaining not evaluated: "
+                        + str(analysis.get("error", "certificates unavailable"))
+                    )
+                elif analysis.get("names_chain"):
+                    status = TestStatus.PASS
+                    actual_result = "PASS"
+                    message = (
+                        "Name chaining verified: the child certificate's issuer DN matches "
+                        "the parent certificate's subject DN (no mismatch)"
+                    )
+                else:
+                    status = TestStatus.FAIL
+                    actual_result = "FAIL"
+                    message = (
+                        "Name chaining failure detected: the child certificate's issuer DN "
+                        "does not match the parent certificate's subject DN"
+                    )
+
                 self.test_results.append(TestCaseResult(
                     id=str(uuid.uuid4()),
                     category="Path Validation - Foundational",
                     name=test_name,
                     status=status,
-                    message=f"Issuer/Subject mismatch test {'failed as expected' if result else 'incorrectly passed'}",
+                    message=message,
                     details={
                         "test_id": test_id,
-                        "rfc_reference": "Name Chaining Failure",
-                        "expected_result": "FAIL",
-                        "actual_result": "FAIL" if result else "PASS",
-                        "description": "Tests detection of issuer/subject DN mismatches in certificate chains",
+                        "rfc_reference": "RFC 5280 §6.1.3 (a)(4) — Name Chaining",
+                        # A correctly supplied issuer/EE pair is expected to
+                        # chain (PASS); FAIL means a real mismatch was found.
+                        "expected_result": "PASS",
+                        "actual_result": actual_result,
+                        "description": "Verifies issuer/subject DN name chaining between a certificate and its issuer",
+                        "name_chaining": name_chaining,
                         "validation_steps": [
-                            "Load child certificate",
-                            "Load parent certificate",
+                            "Load child (end-entity) certificate",
+                            "Load parent (issuer) certificate",
                             "Compare child certificate's issuer DN with parent certificate's subject DN",
-                            "Check for DN mismatch",
-                            "Verify proper certificate chain relationship"
+                            "Report the two DNs and whether they chain",
                         ],
                         "test_category": "Foundational Path Construction",
                         "severity": "Critical",
@@ -1758,39 +1792,49 @@ class PathValidationTestSuite:
         except Exception as e:
             return False
     
-    def _test_issuer_subject_mismatch(self, test_inputs: Dict[str, Any]) -> bool:
-        """Test for issuer/subject DN mismatch"""
+    def _test_issuer_subject_mismatch(self, test_inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """Evaluate RFC 5280 name chaining between the child (end-entity) and
+        parent (issuer) certificate.
+
+        Returns a structured result carrying both DNs so the outcome can be
+        verified manually, plus ``names_chain`` — True when the child's issuer
+        DN matches the parent's subject DN (a healthy chain), False when they
+        differ (a genuine name-chaining failure the tool has detected).
+        ``available`` is False when either certificate could not be loaded, so
+        the caller can report SKIP rather than a misleading pass/fail.
+        """
+        issuer_path = test_inputs.get('issuer_path')
+        good_cert_path = test_inputs.get('good_cert_path')
+
+        if not issuer_path or not good_cert_path:
+            return {"available": False, "error": "issuer and end-entity certificates are required"}
+
         try:
-            # Load certificates
-            issuer_path = test_inputs.get('issuer_path')
-            good_cert_path = test_inputs.get('good_cert_path')
-            
-            if not issuer_path or not good_cert_path:
-                return False
-            
-            # Load certificates
             with open(issuer_path, 'rb') as f:
                 issuer_data = f.read()
                 try:
                     issuer_cert = x509.load_pem_x509_certificate(issuer_data)
-                except:
+                except Exception:
                     issuer_cert = x509.load_der_x509_certificate(issuer_data)
-            
+
             with open(good_cert_path, 'rb') as f:
                 good_data = f.read()
                 try:
                     good_cert = x509.load_pem_x509_certificate(good_data)
-                except:
+                except Exception:
                     good_cert = x509.load_der_x509_certificate(good_data)
-            
-            # Check if issuer DN matches subject DN
-            if good_cert.issuer == issuer_cert.subject:
-                return False  # Test should PASS (no mismatch detected)
-            else:
-                return True   # Test should FAIL (mismatch detected)
-                
         except Exception as e:
-            return False
+            return {"available": False, "error": f"could not load certificates: {e}"}
+
+        names_chain = good_cert.issuer == issuer_cert.subject
+        return {
+            "available": True,
+            "names_chain": names_chain,
+            "child_subject": good_cert.subject.rfc4514_string(),
+            "child_issuer": good_cert.issuer.rfc4514_string(),
+            "parent_subject": issuer_cert.subject.rfc4514_string(),
+            "parent_issuer": issuer_cert.issuer.rfc4514_string(),
+        }
 
 
 def _log_debug(message: str, log_callback=None) -> None:

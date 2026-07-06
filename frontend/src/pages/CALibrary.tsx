@@ -1,14 +1,20 @@
 import { useEffect, useState } from 'react';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { ShareDialog } from '../components/ShareDialog';
 import {
   ApiError,
+  caCertDownloadUrl,
   deleteCACert,
   fetchCACert,
+  getActiveWorkspaceId,
+  getCACert,
   listCACerts,
   listWellKnownCAs,
   renameCACert,
+  shareCACert,
   uploadCACert,
   type CACert,
+  type CACertDetail,
   type CACertImportResult,
   type WellKnownCA,
 } from '../lib/api';
@@ -30,6 +36,9 @@ export function CALibrary() {
   const [fetchName, setFetchName] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<CACert | null>(null);
+  const [pendingShare, setPendingShare] = useState<CACert | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [viewCert, setViewCert] = useState<CACertDetail | null>(null);
   const [fileKey, setFileKey] = useState(0);
   const [editId, setEditId] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
@@ -138,6 +147,35 @@ export function CALibrary() {
     } catch (err) {
       setPendingDelete(null);
       setError(err instanceof ApiError ? err.detail : 'Delete failed.');
+    }
+  };
+
+  const handleView = async (c: CACert) => {
+    setError(null);
+    try {
+      setViewCert(await getCACert(c.id));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : 'Could not load certificate.');
+    }
+  };
+
+  const handleShare = async (targetWorkspaceId: number) => {
+    if (!pendingShare) return;
+    setShareBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await shareCACert(pendingShare.id, targetWorkspaceId);
+      setNotice(
+        result.created.length > 0
+          ? `Shared “${pendingShare.name}” to the selected workspace.`
+          : 'That workspace already has this certificate — nothing to copy.',
+      );
+      setPendingShare(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : 'Share failed.');
+    } finally {
+      setShareBusy(false);
     }
   };
 
@@ -360,6 +398,31 @@ export function CALibrary() {
                         <button
                           type="button"
                           className="btn btn-sm"
+                          onClick={() => void handleView(c)}
+                        >
+                          View
+                        </button>
+                        <a
+                          className="btn btn-sm"
+                          href={caCertDownloadUrl(c.id)}
+                          download
+                        >
+                          Download
+                        </a>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() => {
+                            setPendingShare(c);
+                            setError(null);
+                            setNotice(null);
+                          }}
+                        >
+                          Share
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
                           disabled={editId === c.id}
                           onClick={() => startRename(c)}
                         >
@@ -392,6 +455,79 @@ export function CALibrary() {
         >
           {`Removes “${pendingDelete.name}” from the CA library. Existing runs are not affected, but profiles referencing it will need a new selection.`}
         </ConfirmDialog>
+      )}
+
+      {viewCert && (
+        <div className="dialog-backdrop" onMouseDown={() => setViewCert(null)}>
+          <div
+            className="dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Certificate ${viewCert.name}`}
+            style={{ width: 'min(680px, 94vw)' }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h3>{viewCert.name}</h3>
+            <div className="cert-card">
+              <dl>
+                <dt>Subject</dt>
+                <dd>{viewCert.subject}</dd>
+                <dt>Issuer</dt>
+                <dd>{viewCert.issuer}</dd>
+                <dt>Serial</dt>
+                <dd>{viewCert.serial_number}</dd>
+                <dt>SHA-256</dt>
+                <dd>{viewCert.fingerprint_sha256}</dd>
+                <dt>Valid from</dt>
+                <dd>{formatDateTime(viewCert.not_before)}</dd>
+                <dt>Valid to</dt>
+                <dd>
+                  {formatDateTime(viewCert.not_after)}
+                  {viewCert.expired && <span className="expired"> (expired)</span>}
+                </dd>
+                <dt>Type</dt>
+                <dd>
+                  {viewCert.self_signed
+                    ? 'Root (self-signed)'
+                    : viewCert.is_ca
+                      ? 'CA'
+                      : 'Leaf'}
+                </dd>
+                <dt>Source</dt>
+                <dd>
+                  {viewCert.source}
+                  {viewCert.source_url ? ` — ${viewCert.source_url}` : ''}
+                </dd>
+              </dl>
+            </div>
+            <div className="token-reveal mono" style={{ marginTop: 12 }}>
+              {viewCert.pem}
+            </div>
+            <div className="dialog-actions">
+              <a className="btn" href={caCertDownloadUrl(viewCert.id)} download>
+                Download PEM
+              </a>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setViewCert(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingShare && (
+        <ShareDialog
+          title="Share certificate"
+          itemName={pendingShare.name}
+          sourceWorkspaceId={getActiveWorkspaceId()}
+          busy={shareBusy}
+          onShare={(id) => void handleShare(id)}
+          onClose={() => setPendingShare(null)}
+        />
       )}
     </>
   );

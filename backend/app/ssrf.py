@@ -121,3 +121,47 @@ def _block(url: str, reason: str) -> None:
 def validate_urls(urls: Iterable[str], policy: NetworkPolicy) -> None:
     for url in urls:
         validate_url(url, policy)
+
+
+def guarded_fetch(
+    url: str,
+    policy: NetworkPolicy,
+    *,
+    timeout: int,
+    max_bytes: int,
+    max_redirects: int = 5,
+) -> bytes:
+    """Fetch ``url`` with the SSRF policy enforced on the initial request **and
+    on every redirect hop**, plus a hard response-size cap.
+
+    The API process (unlike the per-run worker) has no ``requests`` net-guard
+    installed, so redirects must be followed manually: ``requests`` would
+    otherwise follow a ``Location`` to an internal/metadata address that was
+    never passed through :func:`validate_url`. Each hop is validated before a
+    socket is opened to it, and auto-redirects are disabled.
+    """
+    import requests
+
+    current = url
+    for _ in range(max_redirects + 1):
+        validate_url(current, policy)
+        response = requests.get(current, timeout=timeout, stream=True, allow_redirects=False)
+        try:
+            if response.is_redirect:
+                location = response.headers.get("Location")
+                if not location:
+                    raise BlockedTargetError(current, "redirect response without a Location header")
+                current = requests.compat.urljoin(current, location)
+                continue
+            response.raise_for_status()
+            chunks: List[bytes] = []
+            read = 0
+            for chunk in response.iter_content(chunk_size=65536):
+                chunks.append(chunk)
+                read += len(chunk)
+                if read > max_bytes:
+                    raise ValueError(f"response exceeded {max_bytes} byte limit")
+            return b"".join(chunks)
+        finally:
+            response.close()
+    raise BlockedTargetError(url, f"exceeded {max_redirects} redirects")

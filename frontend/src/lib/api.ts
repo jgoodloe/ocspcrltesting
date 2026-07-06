@@ -109,6 +109,11 @@ export interface CACert {
   created_at: string;
 }
 
+export interface CACertDetail extends CACert {
+  /** The stored certificate in PEM form (for inspection and download). */
+  pem: string;
+}
+
 export interface CACertImportResult {
   created: CACert[];
   skipped_duplicates: number;
@@ -513,6 +518,26 @@ export function fetchCACert(url: string, name?: string): Promise<CACertImportRes
   );
 }
 
+export function getCACert(id: number): Promise<CACertDetail> {
+  return request<CACertDetail>(`/ca-certs/${id}`);
+}
+
+/** Direct download URL for a saved certificate's PEM (workspace-scoped). */
+export function caCertDownloadUrl(id: number): string {
+  return apiUrl(withWorkspace(`/ca-certs/${id}/download`));
+}
+
+/** Copy a saved certificate into another workspace (member/admin only). */
+export function shareCACert(
+  id: number,
+  targetWorkspaceId: number,
+): Promise<CACertImportResult> {
+  return request<CACertImportResult>(
+    `/ca-certs/${id}/share`,
+    jsonInit('POST', { target_workspace_id: targetWorkspaceId }),
+  );
+}
+
 export function renameCACert(id: number, name: string): Promise<CACert> {
   return request<CACert>(`/ca-certs/${id}`, jsonInit('PATCH', { name }));
 }
@@ -569,6 +594,17 @@ export function updateProfile(
 
 export function deleteProfile(profileId: number): Promise<void> {
   return request<void>(`/profiles/${profileId}`, { method: 'DELETE' });
+}
+
+/** Copy a profile into another workspace (member/admin only). */
+export function shareProfile(
+  profileId: number,
+  targetWorkspaceId: number,
+): Promise<Profile> {
+  return request<Profile>(
+    `/profiles/${profileId}/share`,
+    jsonInit('POST', { target_workspace_id: targetWorkspaceId }),
+  );
 }
 
 // ---------------------------------------------------------------------------

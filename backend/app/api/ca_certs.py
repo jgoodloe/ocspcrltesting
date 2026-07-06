@@ -20,21 +20,23 @@ from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..authz import Role, WorkspaceContext, active_workspace
+from ..authz import Role, WorkspaceContext, active_workspace, authorize_workspace_role
 from ..certs import CertificateError, load_certificates_any
 from ..db import get_session
 from ..orm import CACertificate
 from ..schemas import (
+    CACertDetail,
     CACertFetchIn,
     CACertImportResult,
     CACertList,
     CACertOut,
     CACertUpdate,
+    ShareIn,
     WellKnownCA,
     WellKnownCAList,
 )
 from ..settings import get_settings
-from ..ssrf import BlockedTargetError, NetworkPolicy, validate_url
+from ..ssrf import BlockedTargetError, NetworkPolicy, guarded_fetch
 from .certs import read_limited_upload
 
 logger = logging.getLogger("ocspweb.api.ca_certs")
@@ -86,6 +88,10 @@ def _to_out(row: CACertificate) -> CACertOut:
         source_url=row.source_url,
         created_at=row.created_at,
     )
+
+
+def _to_detail(row: CACertificate) -> CACertDetail:
+    return CACertDetail(**_to_out(row).model_dump(), pem=row.pem)
 
 
 def _display_name(cert: x509.Certificate) -> str:
@@ -205,27 +211,18 @@ async def fetch_ca_cert(
 ) -> CACertImportResult:
     settings = get_settings()
     policy = NetworkPolicy.from_settings(settings)
-    try:
-        validate_url(payload.url, policy)
-    except BlockedTargetError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
+    # guarded_fetch re-validates the initial URL and every redirect hop; the
+    # API process has no requests net-guard, so redirects must be policed here.
     def _download() -> bytes:
-        import requests
-
-        response = requests.get(payload.url, timeout=FETCH_TIMEOUT_SECONDS, stream=True)
-        response.raise_for_status()
-        chunks: List[bytes] = []
-        read = 0
-        for chunk in response.iter_content(chunk_size=65536):
-            chunks.append(chunk)
-            read += len(chunk)
-            if read > MAX_FETCH_BYTES:
-                raise ValueError(f"response exceeded {MAX_FETCH_BYTES} byte limit")
-        return b"".join(chunks)
+        return guarded_fetch(
+            payload.url, policy, timeout=FETCH_TIMEOUT_SECONDS, max_bytes=MAX_FETCH_BYTES
+        )
 
     try:
         data = await asyncio.to_thread(_download)
+    except BlockedTargetError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not fetch {payload.url}: {exc}") from exc
 
@@ -253,6 +250,84 @@ async def _get_in_ws_or_404(session: AsyncSession, cert_id: int, workspace_id: i
     if row is None or row.workspace_id != workspace_id:
         raise HTTPException(status_code=404, detail="Saved certificate not found")
     return row
+
+
+@router.get("/ca-certs/{cert_id}", response_model=CACertDetail)
+async def get_ca_cert(
+    cert_id: int,
+    ctx: WorkspaceContext = Depends(active_workspace(Role.viewer)),
+    session: AsyncSession = Depends(get_session),
+) -> CACertDetail:
+    row = await _get_in_ws_or_404(session, cert_id, ctx.workspace.id)
+    return _to_detail(row)
+
+
+def _download_filename(row: CACertificate) -> str:
+    """A safe, human-friendly filename for the downloaded PEM."""
+    base = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in (row.name or "certificate"))
+    base = base.strip("_.") or "certificate"
+    return f"{base[:100]}.pem"
+
+
+@router.get("/ca-certs/{cert_id}/download")
+async def download_ca_cert(
+    cert_id: int,
+    ctx: WorkspaceContext = Depends(active_workspace(Role.viewer)),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    row = await _get_in_ws_or_404(session, cert_id, ctx.workspace.id)
+    return Response(
+        content=row.pem,
+        media_type="application/x-pem-file",
+        headers={"Content-Disposition": f'attachment; filename="{_download_filename(row)}"'},
+    )
+
+
+@router.post("/ca-certs/{cert_id}/share", response_model=CACertImportResult, status_code=201)
+async def share_ca_cert(
+    cert_id: int,
+    payload: ShareIn,
+    ctx: WorkspaceContext = Depends(active_workspace(Role.viewer)),
+    session: AsyncSession = Depends(get_session),
+) -> CACertImportResult:
+    """Copy a saved certificate into another workspace. The caller must be a
+    member or admin (never merely a viewer) of the target workspace."""
+    row = await _get_in_ws_or_404(session, cert_id, ctx.workspace.id)
+    if payload.target_workspace_id == ctx.workspace.id:
+        raise HTTPException(status_code=400, detail="Certificate is already in this workspace")
+    target = await authorize_workspace_role(
+        session, ctx.principal, payload.target_workspace_id, Role.member
+    )
+    existing = (
+        await session.execute(
+            select(CACertificate).where(
+                CACertificate.workspace_id == target.workspace.id,
+                CACertificate.fingerprint_sha256 == row.fingerprint_sha256,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return CACertImportResult(created=[], skipped_duplicates=1)
+    copy = CACertificate(
+        workspace_id=target.workspace.id,
+        created_by_user_id=ctx.principal.user.id or None,
+        name=row.name,
+        pem=row.pem,
+        subject=row.subject,
+        issuer=row.issuer,
+        serial_number=row.serial_number,
+        fingerprint_sha256=row.fingerprint_sha256,
+        not_before=row.not_before,
+        not_after=row.not_after,
+        is_ca=row.is_ca,
+        source=row.source,
+        source_url=row.source_url,
+    )
+    session.add(copy)
+    await session.commit()
+    await session.refresh(copy)
+    logger.info("CA cert %d shared into workspace %d", cert_id, target.workspace.id)
+    return CACertImportResult(created=[_to_out(copy)], skipped_duplicates=0)
 
 
 @router.patch("/ca-certs/{cert_id}", response_model=CACertOut)

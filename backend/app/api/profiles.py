@@ -6,10 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..authz import Role, WorkspaceContext, active_workspace
+from ..authz import Role, WorkspaceContext, active_workspace, authorize_workspace_role
 from ..db import get_session
 from ..orm import Profile, utcnow
-from ..schemas import ProfileIn, ProfileList, ProfileOut
+from ..schemas import ProfileIn, ProfileList, ProfileOut, ShareIn
 
 router = APIRouter(tags=["profiles"])
 
@@ -90,6 +90,35 @@ async def update_profile(
     await session.commit()
     await session.refresh(profile)
     return _to_out(profile)
+
+
+@router.post("/profiles/{profile_id}/share", response_model=ProfileOut, status_code=201)
+async def share_profile(
+    profile_id: int,
+    payload: ShareIn,
+    ctx: WorkspaceContext = Depends(active_workspace(Role.viewer)),
+    session: AsyncSession = Depends(get_session),
+) -> ProfileOut:
+    """Copy a profile into another workspace. The caller must be a member or
+    admin (never merely a viewer) of the target workspace."""
+    profile = await _get_in_ws_or_404(session, profile_id, ctx.workspace.id)
+    if payload.target_workspace_id == ctx.workspace.id:
+        raise HTTPException(status_code=400, detail="Profile is already in this workspace")
+    target = await authorize_workspace_role(
+        session, ctx.principal, payload.target_workspace_id, Role.member
+    )
+    await _check_name_free(session, target.workspace.id, profile.name)
+    copy = Profile(
+        workspace_id=target.workspace.id,
+        created_by_user_id=ctx.principal.user.id or None,
+        name=profile.name,
+        description=profile.description,
+        config_json=profile.config_json,
+    )
+    session.add(copy)
+    await session.commit()
+    await session.refresh(copy)
+    return _to_out(copy)
 
 
 @router.delete("/profiles/{profile_id}", status_code=204)

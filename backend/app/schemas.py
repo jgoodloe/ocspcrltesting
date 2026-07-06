@@ -259,8 +259,23 @@ class CACertOut(BaseModel):
     created_at: datetime
 
 
+class CACertDetail(CACertOut):
+    """Full saved-certificate record, including the stored PEM for inspection
+    and download."""
+
+    pem: str
+
+
 class CACertList(BaseModel):
     items: List[CACertOut]
+
+
+class ShareIn(BaseModel):
+    """Copy a profile or saved certificate into another workspace."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_workspace_id: int
 
 
 class CACertUpdate(BaseModel):

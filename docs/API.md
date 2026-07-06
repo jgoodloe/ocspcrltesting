@@ -319,6 +319,14 @@ Response `201` Profile:
 
 `409` on duplicate profile name.
 
+### `POST /api/profiles/{profile_id}/share`
+Body `{ "target_workspace_id": N }`. Copies the profile into another workspace.
+The caller must be a **member or admin** (never merely a viewer) of the target
+workspace. Response `201` with the new Profile. `400` when the target is the
+source workspace, `403` when the caller lacks contributor rights in the target,
+`404` unknown profile, `409` when a profile of that name already exists in the
+target.
+
 ---
 
 ## Test catalog and global test selection
@@ -385,12 +393,32 @@ fingerprint) are skipped. Response `201`:
 ### `POST /api/ca-certs/fetch`
 Body `{ "url": "http://repo.fpki.gov/fcpca/fcpcag2.crt", "name": null }`.
 The server downloads the certificate (SSRF policy applies, 2 MiB cap) and
-imports it like an upload. `403` when blocked by policy, `502` on fetch
-failure, `400` when the payload is not certificate data.
+imports it like an upload. The initial URL **and every redirect hop** are
+re-validated against the policy before a connection is opened. `403` when
+blocked by policy, `502` on fetch failure, `400` when the payload is not
+certificate data.
 
 ### `GET /api/ca-certs/well-known`
 Curated list of well-known Federal PKI CAs
 (`{ key, name, url, description }`) for one-click import via `/fetch`.
+
+### `GET /api/ca-certs/{id}`
+Full record including the stored PEM: CACert plus `{ "pem": "-----BEGIN…" }`.
+`404` unknown id (or not in this workspace).
+
+### `GET /api/ca-certs/{id}/download`
+The certificate as `application/x-pem-file` with a
+`Content-Disposition: attachment` filename derived from its name. `404`
+unknown id.
+
+### `POST /api/ca-certs/{id}/share`
+Body `{ "target_workspace_id": N }`. Copies the saved certificate into another
+workspace. The caller must be a **member or admin** (never merely a viewer) of
+the target workspace. Response `201`
+`{ "created": [CACert, ...], "skipped_duplicates": 0 }` (the target already
+having the certificate — by fingerprint — yields `created: []`,
+`skipped_duplicates: 1`). `400` when the target is the source workspace, `403`
+when the caller lacks contributor rights in the target, `404` unknown id.
 
 ### `PATCH /api/ca-certs/{id}`
 Renames a saved certificate. Body `{ "name": "New name" }`. Response: the

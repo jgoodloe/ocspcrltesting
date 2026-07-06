@@ -59,6 +59,27 @@ def test_ca_rename(app_client, cert_fixtures):
     assert app_client.patch(f"/api/ca-certs/{entry['id']}", json={"name": ""}).status_code == 422
 
 
+def test_ca_view_details_and_download(app_client, cert_fixtures):
+    entry = _upload_ca(app_client, cert_fixtures, name="Viewable CA").json()["created"][0]
+
+    detail = app_client.get(f"/api/ca-certs/{entry['id']}")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["name"] == "Viewable CA"
+    assert body["pem"].startswith("-----BEGIN CERTIFICATE-----")
+    assert body["subject"] == entry["subject"]
+
+    download = app_client.get(f"/api/ca-certs/{entry['id']}/download")
+    assert download.status_code == 200
+    assert download.headers["content-type"].startswith("application/x-pem-file")
+    assert "attachment" in download.headers["content-disposition"]
+    assert "Viewable_CA.pem" in download.headers["content-disposition"]
+    assert download.text.startswith("-----BEGIN CERTIFICATE-----")
+
+    assert app_client.get("/api/ca-certs/999999").status_code == 404
+    assert app_client.get("/api/ca-certs/999999/download").status_code == 404
+
+
 def test_well_known_list(app_client):
     body = app_client.get("/api/ca-certs/well-known").json()
     names = [c["name"] for c in body["items"]]

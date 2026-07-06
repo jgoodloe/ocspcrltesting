@@ -2,12 +2,15 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ConfigFields } from '../components/ConfigFields';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { ShareDialog } from '../components/ShareDialog';
 import {
   ApiError,
   createProfile,
   defaultRunConfig,
   deleteProfile,
+  getActiveWorkspaceId,
   listProfiles,
+  shareProfile,
   updateProfile,
   type Profile,
   type RunConfig,
@@ -48,9 +51,12 @@ export function Profiles() {
   const [profiles, setProfiles] = useState<Profile[] | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Profile | null>(null);
+  const [pendingShare, setPendingShare] = useState<Profile | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
 
   const load = async () => {
     try {
@@ -116,6 +122,22 @@ export function Profiles() {
     }
   };
 
+  const handleShare = async (targetWorkspaceId: number) => {
+    if (!pendingShare) return;
+    setShareBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await shareProfile(pendingShare.id, targetWorkspaceId);
+      setNotice(`Shared “${pendingShare.name}” to the selected workspace.`);
+      setPendingShare(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : 'Share failed.');
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
   return (
     <>
       <div className="page-header">
@@ -142,6 +164,11 @@ export function Profiles() {
         <div className="form-error" role="alert">
           <span className="err-status">Error</span>
           {error}
+        </div>
+      )}
+      {notice && (
+        <div className="panel notice-ok" role="status" style={{ marginBottom: 14 }}>
+          {notice}
         </div>
       )}
 
@@ -243,6 +270,17 @@ export function Profiles() {
                         </button>
                         <button
                           type="button"
+                          className="btn btn-sm"
+                          onClick={() => {
+                            setPendingShare(p);
+                            setError(null);
+                            setNotice(null);
+                          }}
+                        >
+                          Share
+                        </button>
+                        <button
+                          type="button"
                           className="btn btn-ghost btn-sm"
                           onClick={() => setPendingDelete(p)}
                         >
@@ -268,6 +306,17 @@ export function Profiles() {
         >
           {`Deletes profile “${pendingDelete.name}”. Existing runs are not affected.`}
         </ConfirmDialog>
+      )}
+
+      {pendingShare && (
+        <ShareDialog
+          title="Share profile"
+          itemName={pendingShare.name}
+          sourceWorkspaceId={getActiveWorkspaceId()}
+          busy={shareBusy}
+          onShare={(id) => void handleShare(id)}
+          onClose={() => setPendingShare(null)}
+        />
       )}
     </>
   );

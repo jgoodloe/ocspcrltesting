@@ -174,6 +174,11 @@ def active_workspace(min_role: Role = Role.viewer):
         principal: Principal = Depends(current_principal),
         session: AsyncSession = Depends(get_session),
     ) -> WorkspaceContext:
+        if workspace_id is None and principal.token_workspace_id is not None:
+            # A workspace-scoped token must never fall back to the owner's
+            # personal/default workspace: resolve to its own scope so the
+            # confinement holds even when the caller omits ``workspace_id``.
+            workspace_id = principal.token_workspace_id
         if workspace_id is None:
             ws, role = await _default_workspace_for(session, principal)
         else:
@@ -196,6 +201,32 @@ def active_workspace(min_role: Role = Role.viewer):
         return WorkspaceContext(workspace=ws, principal=principal, role=role)
 
     return dependency
+
+
+async def authorize_workspace_role(
+    session: AsyncSession, principal: Principal, workspace_id: int, min_role: Role
+) -> WorkspaceContext:
+    """Resolve and authorize an *explicit* workspace at ``min_role`` for the
+    given principal. Used by cross-workspace actions (e.g. sharing) where the
+    target workspace is not the request's active one. Raises 403/404 exactly
+    like the standard dependencies."""
+    workspace = await session.get(Workspace, workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    if principal.token_workspace_id is not None and principal.token_workspace_id != workspace_id:
+        raise HTTPException(status_code=403, detail="Token is not scoped to this workspace")
+    if principal.is_global_admin:
+        effective = Role.admin
+    else:
+        membership = await get_membership(session, principal.user.id, workspace_id)
+        if membership is None:
+            raise HTTPException(status_code=403, detail="Not a member of this workspace")
+        effective = Role.parse(membership.role)
+    if principal.token_role_ceiling is not None and effective > principal.token_role_ceiling:
+        effective = principal.token_role_ceiling
+    if effective < min_role:
+        raise HTTPException(status_code=403, detail=f"Requires {min_role.name} role")
+    return WorkspaceContext(workspace=workspace, principal=principal, role=effective)
 
 
 def require_workspace(min_role: Role = Role.viewer):
