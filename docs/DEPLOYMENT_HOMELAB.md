@@ -2,10 +2,15 @@
 
 For stacks where many apps live in one `docker-compose.yml` behind
 [Nginx Proxy Manager](https://nginxproxymanager.com/) (NPM). Unlike apps such
-as authentik, this tool is deliberately a **single container**: persistence is
-SQLite on a volume and test runs execute as subprocesses inside the container,
-so there is no postgres/redis/worker sidecar to compose. (PostgreSQL support
-is tracked in issue #5 but is not wired up yet.)
+as authentik, this tool can run as a deliberately **single container**: test
+runs execute as subprocesses inside the container, so there is no redis/worker
+sidecar to compose. The compose block below uses on-disk **SQLite** on a volume,
+which is the simplest choice for a homelab. PostgreSQL is also supported (async
+`asyncpg` driver and Alembic migrations are included, and the repo's own
+`docker-compose.yml` uses it by default) — point `OCSPWEB_DATABASE_URL` at a
+Postgres instance if you prefer it. Postgres has not yet been exercised by the
+full CI test suite (issue #5), so validate against your target version before
+relying on it in production.
 
 ## Compose block
 

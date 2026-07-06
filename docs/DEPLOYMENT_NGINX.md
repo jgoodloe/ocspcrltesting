@@ -96,6 +96,12 @@ the `app:8000` upstream with `127.0.0.1:8000`).
 - [ ] `client_max_body_size` ≥ `OCSPWEB_MAX_UPLOAD_BYTES`
 - [ ] WebSocket upgrade headers present (live logs stop working without them;
       the UI falls back to SSE automatically, which needs `proxy_buffering off`)
-- [ ] `OCSPWEB_AUTH_PASSWORD` set for anything reachable beyond your team
+- [ ] Auth enabled for anything reachable beyond your team — set
+      `OCSPWEB_SESSION_SECRET` **and** `OCSPWEB_BOOTSTRAP_ADMIN_PASSWORD`
+      (and/or OIDC). The app is unauthenticated until you do; see
+      [AUTH.md](AUTH.md). (`OCSPWEB_AUTH_PASSWORD` is deprecated and no longer
+      provides HTTP Basic auth.)
+- [ ] `--forwarded-allow-ips` restricted to the proxy's address/subnet (the
+      Docker image currently defaults it to `*`)
 - [ ] `OCSPWEB_ALLOW_PRIVATE_TARGETS` only if the lab responders are private
 - [ ] TLS terminated at nginx with `X-Forwarded-Proto $scheme`

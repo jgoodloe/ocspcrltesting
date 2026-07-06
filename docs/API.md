@@ -3,10 +3,30 @@
 All endpoints are rooted at the configurable base path (default `/`, e.g. `/ocsp`
 behind a subpath reverse proxy). Paths below are relative to that base.
 
-Authentication: when `OCSPWEB_AUTH_PASSWORD` is set, every endpoint (including
-WebSocket/SSE) requires HTTP Basic auth with user `OCSPWEB_AUTH_USERNAME`
-(default `admin`) and that password. Otherwise the API is open (intended for
-trusted internal networks only).
+Authentication depends on how the deployment is configured — see
+[AUTH.md](AUTH.md) for the full model:
+
+- **Open mode** — with no auth configured the API runs as a single anonymous
+  administrator in the shared `Default` workspace. Intended for isolated
+  local/lab use only (see the safety note in the README).
+- **Session login** — set `OCSPWEB_SESSION_SECRET` and
+  `OCSPWEB_BOOTSTRAP_ADMIN_PASSWORD` to enable local login and signed session
+  cookies.
+- **OIDC (SSO)** — set `OCSPWEB_OIDC_ISSUER`/`_CLIENT_ID`/`_CLIENT_SECRET`.
+- **API tokens** — mint per-user bearer tokens (workspace-scoped, role-capped)
+  and send `Authorization: Bearer ocspt_...`. Browsers cannot set headers on a
+  WebSocket handshake, so the stream endpoint also accepts a `token` query
+  parameter.
+
+```bash
+curl -H "Authorization: Bearer ocspt_..." \
+     "https://ocsp.example.com/api/test-runs?workspace_id=3"
+```
+
+> The legacy shared-password HTTP Basic auth (`OCSPWEB_AUTH_PASSWORD` /
+> `OCSPWEB_AUTH_USERNAME`) has been superseded by the multi-user model and is
+> **no longer implemented** — the app performs no Basic authentication. Use the
+> session/OIDC/token auth above instead.
 
 Content type is `application/json` unless noted. Errors use a consistent envelope:
 

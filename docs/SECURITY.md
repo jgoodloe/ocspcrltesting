@@ -16,11 +16,16 @@ Enforcement happens in two layers:
 
 1. **Submission time** (`backend/app/ssrf.py`): the OCSP/CRL URLs in a new
    run are validated before the run is accepted; violations return `403`.
-2. **Request time** (`backend/app/worker/netguard.py`): the worker process
-   patches `requests.Session.send` so *every* outbound request the engine
-   makes — including each individual redirect hop and every discovered URL —
-   is re-validated, timeout-capped and size-capped. The API server process
-   itself never contacts user-supplied targets.
+2. **Request time** (`backend/app/worker/netguard.py`): inside the per-run
+   worker process, `requests.Session.send` is patched so every `requests`-based
+   outbound call the engine makes — including each redirect hop and every
+   discovered URL — is re-validated, timeout-capped and size-capped.
+
+The API server process also fetches one class of user-supplied URL directly:
+the CA-library "fetch from URL" endpoint (`/api/ca-certs/fetch`). It has no
+`requests` net-guard, so it uses `ssrf.guarded_fetch`, which validates the
+initial URL **and every redirect hop** before opening a socket and caps the
+response size.
 
 Default policy (all configurable via environment, see `.env.example`):
 
@@ -41,20 +46,44 @@ Default policy (all configurable via environment, see `.env.example`):
 Cloud metadata addresses remain blocked even in this mode. You can extend the
 blocklist with `OCSPWEB_EXTRA_BLOCKED_HOSTS`.
 
-Note: `openssl ocsp`/`openssl` subprocess calls made by the engine
+Note: `openssl ocsp`/`openssl` (and `curl`) subprocess calls made by the engine
 (path-validation and Federal PKI helpers) go directly to the responder that
 the run was already validated against; the primary URL guard has been applied
-before any of those run.
+before any of those run. Because those calls do not go through `requests`, the
+net-guard's per-hop re-validation and size cap do **not** apply to them.
+
+### Known limitations
+
+The URL guards are validate-then-connect. A residual gap a public-facing
+operator should account for:
+
+- **DNS rebinding / TOCTOU** — validation resolves the hostname, but the actual
+  connection re-resolves it, so a rebinding DNS answer can bypass the IP checks.
+  The `openssl`/`curl` engine calls are likewise not size-capped.
+
+Keep `OCSPWEB_ALLOW_PRIVATE_TARGETS=false` and apply network egress controls
+(allowlist the intended OCSP/CRL hosts) when the service is reachable beyond an
+isolated lab.
 
 ## Authentication
 
-Set `OCSPWEB_AUTH_PASSWORD` (and optionally `OCSPWEB_AUTH_USERNAME`) to
-require HTTP Basic authentication on every endpoint, including the WebSocket
-and SSE streams. Credentials are compared with `secrets.compare_digest`.
-Terminate TLS in front of the app so credentials are never sent in clear.
+Authentication is the multi-user model documented in [AUTH.md](AUTH.md): signed
+session cookies (local login and/or OIDC/authentik SSO) plus per-user,
+workspace-scoped, role-capped API bearer tokens. Enable it by setting
+`OCSPWEB_SESSION_SECRET` and a bootstrap admin password (and/or OIDC). Passwords
+are hashed with argon2id; API tokens are stored only as SHA-256 hashes. Session
+cookies are `HttpOnly`, `Secure` (by default) and `SameSite=Lax`. Terminate TLS
+in front of the app so cookies/tokens are never sent in clear.
 
-Without a password configured the app is open — acceptable only on isolated
-lab networks.
+With **no** auth configured the app runs open — a single anonymous global
+administrator in a shared workspace — acceptable only on isolated lab networks.
+This is a fail-open default: the shipped `docker-compose.yml` leaves
+`OCSPWEB_SESSION_SECRET`/`OCSPWEB_BOOTSTRAP_ADMIN_PASSWORD` empty, so a plain
+`docker compose up` is **unauthenticated** until you configure auth.
+
+> The legacy shared-password HTTP Basic auth (`OCSPWEB_AUTH_PASSWORD`) is
+> **no longer implemented** — setting it does not provide a Basic-auth login
+> path. Use the session/OIDC/token model above.
 
 ## Uploaded certificates and private keys
 
@@ -83,7 +112,9 @@ lab networks.
   nginx). Set `OCSPWEB_CORS_ORIGINS` only if a separate origin must call the
   API; credentials mode is enabled for those origins only.
 - The app trusts `X-Forwarded-*` only from addresses passed to
-  `--forwarded-allow-ips` (see deployment docs).
+  `--forwarded-allow-ips` (see deployment docs). Note the shipped `Dockerfile`
+  currently sets this to `*` (trusts forwarded headers from any client) — an
+  open hardening item; restrict it to the reverse-proxy address/subnet.
 
 ## Execution isolation
 

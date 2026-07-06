@@ -21,6 +21,11 @@ docker compose up --build
 That gives you the app behind nginx at the root path. For a subpath
 deployment (`/ocsp/`), see [docs/DEPLOYMENT_NGINX.md](docs/DEPLOYMENT_NGINX.md).
 
+> ⚠️ **Unauthenticated by default.** The shipped compose leaves
+> `OCSPWEB_SESSION_SECRET` and `OCSPWEB_BOOTSTRAP_ADMIN_PASSWORD` empty, so this
+> runs open as a single anonymous global admin. Enable auth (and TLS) before
+> exposing it beyond localhost/an isolated lab — see [docs/AUTH.md](docs/AUTH.md).
+
 From the browser you can:
 
 - create a test run (upload issuer / known-good / known-revoked certificates,
@@ -41,7 +46,7 @@ nginx  ── X-Forwarded-* / upgrade headers ──►  FastAPI (backend/app)
                                                 │  api/       REST + streaming routers
                                                 │  jobs.py    run supervisor
                                                 │  storage.py run workspaces + retention
-                                                │  SQLite (SQLAlchemy 2, PostgreSQL-ready)
+                                                │  SQLite or PostgreSQL (SQLAlchemy 2)
                                                 ▼
                                     worker subprocess (backend/app/worker)
                                       │  netguard: SSRF policy on every request
