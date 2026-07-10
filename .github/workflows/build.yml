@@ -54,7 +54,7 @@ jobs:
         timeout-minutes: 10
         run: timeout -s ABRT 300 python -X faulthandler -m pytest backend/tests -q
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
