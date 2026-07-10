@@ -1,0 +1,23 @@
+# Dependency review (#45): fails a PR that introduces or bumps a dependency
+# with a known vulnerability of high severity or worse. Complements
+# Dependabot (which updates existing dependencies) by gating new ones.
+# Requires the dependency graph, which is on by default for public repos.
+name: dependency-review
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
