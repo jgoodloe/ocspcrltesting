@@ -1,0 +1,39 @@
+# CodeQL static analysis (#42): Python (backend, ocsp_tester, cli.py) and
+# JavaScript/TypeScript (frontend). Runs on pushes and PRs to main plus a
+# weekly cron so new queries shipped by GitHub re-scan the existing code.
+# Findings land in the repository's Security tab (code scanning alerts).
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "26 7 * * 2"
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # Both languages analyze without a build; the frontend bundle and
+          # pip install are not needed for scanning.
+          build-mode: none
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
