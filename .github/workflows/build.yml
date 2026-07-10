@@ -9,6 +9,11 @@ on:
     tags: ["v*"]
   pull_request:
     branches: [main]
+  # Weekly canary run (#50): catches dependency/toolchain drift during quiet
+  # periods so the next real commit doesn't inherit a mystery failure.
+  # Scheduled runs execute the test job only — see the image job's `if`.
+  schedule:
+    - cron: "17 6 * * 1"
   workflow_dispatch:
 
 concurrency:
@@ -64,10 +69,11 @@ jobs:
   image:
     name: Prebuild container image (GHCR)
     needs: test
-    # Publish from pushes to main, version tags, and feature branches — never
-    # from PRs (a fork PR's GITHUB_TOKEN cannot write packages, and we do not
-    # want to publish images built from untrusted PR code).
-    if: github.event_name != 'pull_request'
+    # Publish from pushes to main, version tags, and feature branches (plus
+    # manual dispatch) — never from PRs (a fork PR's GITHUB_TOKEN cannot write
+    # packages, and we do not want to publish images built from untrusted PR
+    # code) and never from the weekly scheduled canary run, which only tests.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -123,3 +129,53 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  release:
+    name: Publish GitHub Release
+    # Automated release on version tags (#44): the release body is the tag's
+    # section from CHANGELOG.md (the curated source of truth), plus the GHCR
+    # pull line for the image this same run just published. Runs only after
+    # the image publish succeeds so a release never points at a missing tag.
+    needs: image
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          # Grab everything between "## <tag>" (e.g. "## v1.0.0 — ...") and
+          # the next "## " heading. Fail loudly if the section is missing so
+          # a tag can't ship with an empty release body.
+          awk -v ver="$GITHUB_REF_NAME" '
+            !found && index($0, "## " ver) == 1 {
+              # Reject prefix matches: after "## <ver>" the heading must end
+              # or continue with something that is not more version digits
+              # (so tag v1.0 cannot match the "## v1.0.0" section).
+              rest = substr($0, length("## " ver) + 1)
+              if (rest == "" || rest !~ /^[0-9.]/) { found = 1; next }
+            }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error::No CHANGELOG.md section found for $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          {
+            echo ""
+            echo "---"
+            echo ""
+            echo "Container image for this release:"
+            echo ""
+            echo '```'
+            echo "docker pull ghcr.io/$GITHUB_REPOSITORY:${GITHUB_REF_NAME#v}"
+            echo '```'
+          } >> release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
