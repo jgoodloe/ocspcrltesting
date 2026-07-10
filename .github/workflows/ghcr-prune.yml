@@ -1,0 +1,103 @@
+# GHCR housekeeping (#47): build.yml publishes a multi-arch preview image for
+# every feature branch, and nothing deleted them — the package grew unbounded.
+#
+# Two triggers:
+#   - `delete` (a branch was deleted): remove that branch's preview tag
+#     immediately.
+#   - weekly cron / manual dispatch: remove tagged versions older than 30 days
+#     whose tags are ALL prunable (branch previews). An active long-lived
+#     branch whose preview gets pruned is re-published on its next push.
+#
+# Never touched:
+#   - `latest`, `main`, semver tags (1.0.0 / 1.0), and `sha-*` tags — anything
+#     a deployment or release could reference.
+#   - Untagged versions. Multi-arch pushes leave per-arch manifests untagged
+#     but still referenced by tagged manifest lists; deleting them would break
+#     `docker pull` of live tags. They are only orphaned storage, not risk.
+name: ghcr-prune
+
+on:
+  delete:
+  schedule:
+    - cron: "43 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    # Tag deletions also fire the `delete` event; only branch deletions map to
+    # preview images.
+    if: github.event_name != 'delete' || github.event.ref_type == 'branch'
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Prune preview images
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY_OWNER}"
+          pkg="${GITHUB_REPOSITORY#*/}"
+          api="users/${owner}/packages/container/${pkg}/versions"
+
+          # Tags that must never be pruned, mirroring what build.yml publishes
+          # for main, releases, and commit SHAs.
+          protected() {
+            case "$1" in
+              latest|main) return 0 ;;
+              sha-*) return 0 ;;
+            esac
+            # Semver including prereleases (1.0, 1.0.0, 1.0.0-rc1). Anything
+            # that merely LOOKS like a version stays protected — safe side.
+            printf '%s' "$1" | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?(-.*)?$'
+          }
+
+          delete_version() { # id, tags (for the log)
+            echo "Deleting version $1 (tags: $2)"
+            gh api -X DELETE "${api}/$1" ||
+              echo "::warning::Failed to delete version $1"
+          }
+
+          if [ "${GITHUB_EVENT_NAME}" = "delete" ]; then
+            # Recompute the preview tag the same way build.yml does: strip the
+            # claude/ prefix, then slashes -> dashes.
+            ref="$(jq -r '.ref' "${GITHUB_EVENT_PATH}")"
+            ref="${ref#claude/}"
+            tag="${ref//\//-}"
+            if protected "$tag"; then
+              echo "Refusing to prune protected tag '$tag'"
+              exit 0
+            fi
+            echo "Branch deleted; pruning preview tag '$tag'"
+            gh api --paginate "${api}?per_page=100" \
+              --jq '.[] | [.id, (.metadata.container.tags | join(","))] | @tsv' |
+            while IFS=$'\t' read -r id tags; do
+              case ",${tags}," in
+                *",${tag},"*) delete_version "$id" "$tags" ;;
+              esac
+            done
+            exit 0
+          fi
+
+          # Scheduled / manual sweep: tagged versions older than the cutoff
+          # where every tag is prunable.
+          cutoff="$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+          echo "Pruning preview versions not updated since ${cutoff}"
+          gh api --paginate "${api}?per_page=100" \
+            --jq '.[]
+                  | select((.metadata.container.tags | length) > 0)
+                  | [.id, .updated_at, (.metadata.container.tags | join(","))]
+                  | @tsv' |
+          while IFS=$'\t' read -r id updated tags; do
+            [ "$updated" \< "$cutoff" ] || continue
+            keep=false
+            IFS=',' read -ra tag_list <<< "$tags"
+            for t in "${tag_list[@]}"; do
+              if protected "$t"; then keep=true; break; fi
+            done
+            if [ "$keep" = false ]; then
+              delete_version "$id" "$tags"
+            fi
+          done
