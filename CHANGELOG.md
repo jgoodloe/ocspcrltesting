@@ -3,6 +3,25 @@
 All notable changes to this project are documented here. This project adheres
 to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Project infrastructure
+
+- Dependabot updates for pip, npm, Docker base images, and GitHub Actions (#41).
+- CodeQL code scanning for Python and JavaScript/TypeScript (#42).
+- GitHub Releases are now published automatically from the tag's CHANGELOG
+  section on `v*` pushes, including the GHCR pull line (#44).
+- Dependency-review gate on pull requests (#45).
+- Vulnerability disclosure policy: private reporting instructions in
+  `docs/SECURITY.md` plus a root `SECURITY.md` pointer (#46).
+- Scheduled cleanup of stale GHCR branch-preview images, plus immediate
+  cleanup when a branch is deleted (#47).
+- Issue forms (bug / feature / security hardening) and a pull request
+  template (#48).
+- README status badges (#49).
+- Weekly scheduled CI run to catch dependency and toolchain drift; scheduled
+  runs never publish images (#50).
+
 ## v1.0.0 — Initial release
 
 **OCSP/CRL Testing Web** is a self-hostable web application (with a companion

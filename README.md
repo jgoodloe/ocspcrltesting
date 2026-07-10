@@ -1,5 +1,10 @@
 # ocspcrltesting
 
+[![build](https://github.com/jgoodloe/ocspcrltesting/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/jgoodloe/ocspcrltesting/actions/workflows/build.yml)
+[![CodeQL](https://github.com/jgoodloe/ocspcrltesting/actions/workflows/codeql.yml/badge.svg)](https://github.com/jgoodloe/ocspcrltesting/security/code-scanning)
+[![Latest release](https://img.shields.io/github/v/release/jgoodloe/ocspcrltesting)](https://github.com/jgoodloe/ocspcrltesting/releases/latest)
+[![Container image](https://img.shields.io/badge/ghcr.io-jgoodloe%2Focspcrltesting-blue)](https://github.com/jgoodloe/ocspcrltesting/pkgs/container/ocspcrltesting)
+
 Web-based OCSP / CRL / certificate-path testing tool — the browser version of
 [jgoodloe/OCSPTesting](https://github.com/jgoodloe/OCSPTesting), packaged for
 Docker and nginx.
