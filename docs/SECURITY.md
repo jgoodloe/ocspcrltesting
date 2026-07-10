@@ -124,6 +124,28 @@ This is a fail-open default: the shipped `docker-compose.yml` leaves
 - Concurrency is capped by `OCSPWEB_MAX_CONCURRENT_RUNS` (`429` beyond it).
 - The Docker image runs as a non-root user (`uid 10001`).
 
-## Reporting
+## Reporting a vulnerability
 
-This is an internal tool; report issues via the repository issue tracker.
+If you believe you have found an exploitable vulnerability, please report it
+**privately** rather than opening a public issue:
+
+- **Preferred:** GitHub private vulnerability reporting —
+  [open a draft security advisory](https://github.com/jgoodloe/ocspcrltesting/security/advisories/new).
+  This keeps the report visible only to the maintainer until a fix is
+  released.
+- Please include: the affected version or image tag, deployment mode
+  (docker compose / source / CLI), configuration relevant to the finding
+  (auth mode, SSRF policy settings), reproduction steps, and impact.
+
+You should receive an acknowledgement within **7 days**. Please allow a
+reasonable window for a fix before public disclosure; you will be credited in
+the release notes unless you prefer otherwise.
+
+Non-exploitable hardening suggestions (missing headers, defense-in-depth
+gaps, documentation corrections) are welcome as regular issues with the
+`security` label.
+
+### Supported versions
+
+Fixes land on `main` and ship in the next tagged release; only the latest
+release line receives security fixes.
