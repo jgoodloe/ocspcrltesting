@@ -7,7 +7,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ---- Stage 2: Python runtime ------------------------------------------------
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # The test engine shells out to the openssl CLI (monitor/path-validation).
 # python:slim ships it; this guard fails the build early if a future base
