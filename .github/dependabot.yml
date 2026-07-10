@@ -1,0 +1,47 @@
+# Dependabot keeps all four ecosystems current (#41). Minor/patch updates are
+# grouped into one weekly PR per ecosystem to keep noise down; security
+# advisories always get their own immediate PR regardless of grouping. Every
+# PR is validated by the existing test matrix in build.yml.
+version: 2
+updates:
+  # Web backend (FastAPI app + dev/test tooling).
+  - package-ecosystem: pip
+    directory: "/backend"
+    schedule:
+      interval: weekly
+    groups:
+      backend-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # Root requirements.txt (CLI / engine dependencies).
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      cli-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # React frontend.
+  - package-ecosystem: npm
+    directory: "/frontend"
+    schedule:
+      interval: weekly
+    groups:
+      frontend-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # Base images in the Dockerfile (node:20-alpine, python:3.12-slim).
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+
+  # Action versions in .github/workflows/.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions-minor-patch:
+        update-types: ["minor", "patch"]
