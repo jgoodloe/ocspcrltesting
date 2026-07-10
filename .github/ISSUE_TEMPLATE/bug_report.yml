@@ -1,0 +1,66 @@
+name: Bug report
+description: Something is broken or behaving incorrectly
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version / image tag
+      description: >-
+        Release tag, GHCR image tag, or commit SHA (visible in the image
+        labels or `git rev-parse HEAD` for source builds).
+      placeholder: v1.0.0 / ghcr.io/jgoodloe/ocspcrltesting:latest / abc1234
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment mode
+      options:
+        - docker compose (shipped compose file)
+        - Docker (custom)
+        - Source build (gunicorn/uvicorn)
+        - CLI (cli.py)
+      default: 0
+    validations:
+      required: true
+  - type: dropdown
+    id: auth
+    attributes:
+      label: Authentication mode
+      options:
+        - Open / no auth configured
+        - Local username/password
+        - OIDC SSO
+        - Local + OIDC
+        - Not applicable (CLI)
+    validations:
+      required: false
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start with `docker compose up`
+        2. Create a run against responder X with certificates Y
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: >-
+        Server log, run log stream, or browser console output. The worker
+        redacts private keys, but please double-check pasted logs for
+        internal hostnames or tokens.
+      render: text
+    validations:
+      required: false

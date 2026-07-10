@@ -1,0 +1,46 @@
+name: Security hardening finding
+description: >-
+  Non-exploitable hardening gap or defense-in-depth suggestion. Exploitable
+  vulnerabilities must be reported privately instead — see the link on the
+  new-issue chooser.
+labels: ["security"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        **Is this exploitable?** If it can be used to compromise a deployment
+        (SSRF bypass, auth bypass, injection, key disclosure...), please use
+        [private vulnerability reporting](https://github.com/jgoodloe/ocspcrltesting/security/advisories/new)
+        instead of a public issue.
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - Low
+        - Medium
+        - High (consider private reporting instead)
+      default: 0
+    validations:
+      required: true
+  - type: textarea
+    id: location
+    attributes:
+      label: Location
+      description: Affected files/lines or configuration, e.g. `backend/app/main.py:100`, `nginx/root.conf`.
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What is missing or weak, and what does it enable? Reference CWEs where useful.
+    validations:
+      required: true
+  - type: textarea
+    id: fix
+    attributes:
+      label: Suggested fix
+      render: text
+    validations:
+      required: false
