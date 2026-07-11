@@ -22,6 +22,8 @@ from ..db import get_session, session_factory
 from ..jobs import TERMINAL_STATUSES, get_job_manager
 from ..orm import Run, RunEvent
 
+from ..logging_config import log_safe
+
 logger = logging.getLogger("ocspweb.api.stream")
 
 router = APIRouter(tags=["stream"])
@@ -99,7 +101,7 @@ async def stream_ws(websocket: WebSocket, run_id: str, after_seq: int = Query(de
     except WebSocketDisconnect:
         pass
     except Exception:
-        logger.exception("websocket stream for run %s failed", run_id)
+        logger.exception("websocket stream for run %s failed", log_safe(run_id))
         try:
             await websocket.close(code=1011)
         except RuntimeError:

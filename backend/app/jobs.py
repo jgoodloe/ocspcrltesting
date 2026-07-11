@@ -28,6 +28,8 @@ from .orm import Result, Run, RunEvent, utcnow
 from .settings import Settings, get_settings
 from .storage import RunWorkspace
 
+from .logging_config import log_safe
+
 logger = logging.getLogger("ocspweb.jobs")
 
 TERMINAL_STATUSES = {"completed", "failed", "cancelled", "timed_out"}
@@ -370,7 +372,7 @@ class JobManager:
         await self._update_run(run_id, **fields)
         await self._append_event(run_id, "run_status", await self._run_snapshot(run_id))
         self.notifier.signal(run_id)
-        logger.info("run %s finished with status %s", run_id, status)
+        logger.info("run %s finished with status %s", run_id, log_safe(status))
 
     async def _run_snapshot(self, run_id: str) -> Dict[str, Any]:
         from .api.serializers import run_to_summary  # local import to avoid a cycle

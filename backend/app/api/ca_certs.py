@@ -45,6 +45,8 @@ from ..settings import get_settings
 from ..ssrf import BlockedTargetError, NetworkPolicy, guarded_fetch
 from .certs import read_limited_upload
 
+from ..logging_config import log_safe
+
 logger = logging.getLogger("ocspweb.api.ca_certs")
 
 router = APIRouter(tags=["ca-certificates"])
@@ -248,7 +250,7 @@ async def fetch_ca_cert(
     )
     logger.info(
         "CA library fetch %s: %d created, %d duplicates skipped",
-        payload.url,
+        log_safe(payload.url),
         len(result.created),
         result.skipped_duplicates,
     )
