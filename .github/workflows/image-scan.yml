@@ -1,0 +1,44 @@
+# Container image CVE scan (#77): Trivy scans the published `latest` image's
+# OS packages (the Debian layer of python:*-slim) and Python/npm artifacts
+# baked into it, uploading findings to the Security tab. This covers the layer
+# neither CodeQL (our code) nor Dependabot (declared deps + base-image tags)
+# watches: distro package CVEs that arrive without any change to this repo.
+#
+# ignore-unfixed keeps the signal actionable — a finding appears only when
+# Debian has shipped a fixed package, i.e. when rebuilding the image helps.
+name: image-scan
+
+on:
+  schedule:
+    - cron: "31 6 * * 1"
+  # Re-scan promptly when the image contents change.
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - backend/requirements.txt
+      - .github/workflows/image-scan.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  trivy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scan ghcr latest image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}:latest
+          format: sarif
+          output: trivy.sarif
+          severity: CRITICAL,HIGH,MEDIUM
+          ignore-unfixed: true
+
+      - name: Upload results to code scanning
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-image
