@@ -3,16 +3,17 @@
 All notable changes to this project are documented here. This project adheres
 to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## v1.1.0 — Runtime, dependency, and automation refresh
 
 ### Dependencies & runtimes
 
 - Docker image now builds on **Python 3.14** (`python:3.14-slim`) and
   **Node 26** (`node:26-alpine`); CI tests the same runtimes.
-- **cryptography 49**, SQLAlchemy/uvicorn/aiosqlite/requests and friends
-  raised to current releases.
-- Frontend: **react-router-dom 7** (verified under subpath deployment),
-  **TypeScript 7**.
+- **cryptography 49**, SQLAlchemy/uvicorn/aiosqlite/asyncpg/requests and
+  friends raised to current releases.
+- Frontend: **React 19**, **react-router-dom 7**, **Vite 8**, and
+  **TypeScript 7** — each verified end-to-end, including under a subpath
+  (`/ocsp/`) deployment.
 
 ### Project infrastructure
 
