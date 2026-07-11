@@ -1,0 +1,27 @@
+# zizmor configuration for the workflow-lint job (#80).
+rules:
+  # Hash-pinning every action needs the upstream tag->SHA mapping and is
+  # tracked as a one-time pass in #80; don't fail CI on it until that lands.
+  # REMOVE this ignore once actions are pinned so regressions are caught.
+  unpinned-uses:
+    ignore:
+      - build.yml
+      - codeql.yml
+      - dependency-review.yml
+      - ghcr-prune.yml
+      - image-scan.yml
+      - scorecard.yml
+      - workflow-lint.yml
+
+  # pip/npm/buildx caches in build.yml: GitHub's cache scoping isolates PR
+  # caches from main/tag runs (a PR cache can never be read by a release
+  # build), so the poisoning path zizmor warns about is not reachable.
+  cache-poisoning:
+    ignore:
+      - build.yml
+
+  # Flags softprops/action-gh-release as replaceable by the runner's `gh`
+  # CLI. True, but the action is proven (v1.1.0) — revisit with #80.
+  superfluous-actions:
+    ignore:
+      - build.yml
