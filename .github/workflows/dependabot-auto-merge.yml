@@ -16,7 +16,9 @@ permissions:
 
 jobs:
   auto-merge:
-    if: github.actor == 'dependabot[bot]'
+    # PR author, not github.actor: the actor is whoever triggered the event
+    # (e.g. a re-run) and is spoofable relative to authorship.
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: dependabot/fetch-metadata@v2
