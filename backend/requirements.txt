@@ -1,21 +1,24 @@
 # OCSP test engine dependencies (kept in sync with the original project)
 # Lower bounds are held at or above the patched releases for known CVEs
 # (cryptography CVE-2024-26130 + bundled-OpenSSL CVE-2024-6119; requests
-# CVE-2024-35195/CVE-2024-47081).
+# CVE-2024-35195/CVE-2024-47081; authlib/starlette/python-multipart 2025-26
+# advisories — floors at each package's last fixed release).
 cryptography>=49.0.0,<50.0.0
 requests>=2.34.2,<3.0.0
 asn1crypto>=1.5.1,<2.0.0
 
-# Web framework. fastapi>=0.116 is required so the starlette floor below
-# (CVE-2024-47874, CVE-2025-54121) is resolvable; gunicorn>=23 fixes the
-# request-smuggling CVE-2024-6827; python-multipart>=0.0.18 fixes CVE-2024-53981.
+# Web framework. The starlette floor sits at its latest advisory-fixed
+# release (2025-26 batch incl. CVE-2024-47874/CVE-2025-54121); pip resolves a
+# compatible fastapi within the range below. gunicorn>=23 fixes the
+# request-smuggling CVE-2024-6827; python-multipart>=0.0.31 covers its
+# 2025-26 advisories (was >=0.0.18 for CVE-2024-53981).
 fastapi>=0.116.0,<1.0.0
-starlette>=0.47.2
+starlette>=1.3.1
 uvicorn[standard]>=0.51.0,<1.0.0
 gunicorn>=23.0.0,<24.0.0
 pydantic>=2.7.0,<3.0.0
 pydantic-settings>=2.3.0,<3.0.0
-python-multipart>=0.0.18,<1.0.0
+python-multipart>=0.0.31,<1.0.0
 
 # Persistence
 SQLAlchemy>=2.0.51,<3.0.0
@@ -29,9 +32,10 @@ psycopg2-binary>=2.9.12,<3.0.0
 
 # Multi-user auth: OIDC (authentik), local password hashing, signed sessions.
 # Starlette's SessionMiddleware (used by the OIDC flow) requires itsdangerous.
-# authlib>=1.6.4 fixes the JWT algorithm-confusion CVE-2024-37568 (an OIDC
-# ID-token forgery / auth-bypass vector when SSO is enabled).
-authlib>=1.6.4,<2.0.0
+# authlib floor at its last advisory-fixed release (1.6.12); the range
+# previously admitted versions with JWT/JWS handling flaws incl. the
+# algorithm-confusion CVE-2024-37568 (OIDC ID-token forgery when SSO is on).
+authlib>=1.6.12,<2.0.0
 httpx>=0.27.0,<1.0.0
 passlib[argon2]>=1.7.4,<2.0.0
 itsdangerous>=2.2.0,<3.0.0
