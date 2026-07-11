@@ -1,0 +1,103 @@
+# Security digest: maintains ONE issue (label: security-digest) reflecting
+# the live set of open security alerts, since none of the scanners file
+# issues themselves — CodeQL/Trivy/Scorecard report to the code-scanning tab
+# and Dependabot to its own tab, all easy to miss solo.
+#
+# Behavior: daily (and on demand) it lists open code-scanning + Dependabot
+# alerts. Alerts open -> create/update the digest issue (a comment is added
+# whenever the content changes, so watchers get a notification; silent
+# edits would not notify). No alerts -> close the digest issue.
+#
+# No checkout and no third-party actions: pure GitHub API via the runner's
+# gh CLI, so there is nothing to hash-pin (#80) and no workspace to leak
+# credentials into.
+name: security-digest
+
+on:
+  schedule:
+    - cron: "3 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  security-events: read
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Build and publish digest
+        run: |
+          set -euo pipefail
+          repo="$GH_REPO"
+
+          # --paginate emits one JSON array per page; -s 'add' merges them.
+          # Code scanning 404s until the first analysis exists -> treat as [].
+          cs=$(gh api --paginate "repos/$repo/code-scanning/alerts?state=open&per_page=100" 2>/dev/null | jq -s 'add // []' || echo '[]')
+
+          dep='[]'; dep_ok=true
+          if ! dep=$(gh api --paginate "repos/$repo/dependabot/alerts?state=open&per_page=100" 2>/dev/null | jq -s 'add // []'); then
+            dep='[]'; dep_ok=false
+          fi
+
+          cs_n=$(jq 'length' <<<"$cs")
+          dep_n=$(jq 'length' <<<"$dep")
+          total=$((cs_n + dep_n))
+          crit=$(jq '[.[] | select((.security_advisory.severity // "") == "critical")] | length' <<<"$dep")
+          crit=$((crit + $(jq '[.[] | select((.rule.security_severity_level // "") == "critical")] | length' <<<"$cs")))
+          high=$(jq '[.[] | select((.security_advisory.severity // "") == "high")] | length' <<<"$dep")
+          high=$((high + $(jq '[.[] | select((.rule.security_severity_level // "") == "high")] | length' <<<"$cs")))
+
+          title="Security digest: $total open alert(s) ($crit critical, $high high)"
+
+          {
+            echo "Live view of open security alerts, maintained by \`security-digest.yml\` (daily + on demand). Fix the finding or dismiss the alert and this issue updates/closes on the next run."
+            echo
+            echo "## Dependabot alerts ($dep_n)"
+            if [ "$dep_ok" = false ]; then
+              echo "_Could not read Dependabot alerts with this token — check the [Dependabot tab](https://github.com/$repo/security/dependabot) directly._"
+            elif [ "$dep_n" -eq 0 ]; then
+              echo "_None._"
+            else
+              echo "| severity | package | manifest | advisory | alert |"
+              echo "|---|---|---|---|---|"
+              jq -r '.[] | "| \(.security_advisory.severity) | \(.dependency.package.name) | \(.dependency.manifest_path) | \(.security_advisory.ghsa_id): \(.security_advisory.summary) | [#\(.number)](\(.html_url)) |"' <<<"$dep"
+            fi
+            echo
+            echo "## Code scanning alerts ($cs_n)"
+            if [ "$cs_n" -eq 0 ]; then
+              echo "_None._"
+            else
+              echo "| severity | tool | rule | location | alert |"
+              echo "|---|---|---|---|---|"
+              jq -r '.[] | "| \(.rule.security_severity_level // .rule.severity) | \(.tool.name) | \(.rule.id) | \(.most_recent_instance.location.path // "-") | [#\(.number)](\(.html_url)) |"' <<<"$cs"
+            fi
+          } > body.md
+
+          gh label create security-digest --description "Automated security alert digest" --color B60205 --force
+          existing=$(gh issue list --label security-digest --state open --json number --jq '.[0].number // empty')
+
+          if [ "$total" -eq 0 ]; then
+            if [ -n "$existing" ]; then
+              gh issue close "$existing" --comment "All security alerts are resolved — closing until something new appears."
+              echo "Closed digest issue #$existing"
+            else
+              echo "No open alerts and no digest issue — nothing to do."
+            fi
+          elif [ -n "$existing" ]; then
+            old=$(gh issue view "$existing" --json body --jq .body)
+            if [ "$old" != "$(cat body.md)" ]; then
+              gh issue edit "$existing" --title "$title" --body-file body.md
+              gh issue comment "$existing" --body "Digest updated: $total open ($crit critical, $high high)."
+              echo "Updated digest issue #$existing"
+            else
+              echo "Digest issue #$existing unchanged."
+            fi
+          else
+            gh issue create --title "$title" --body-file body.md --label security-digest
+            echo "Created digest issue."
+          fi
