@@ -1,0 +1,32 @@
+# Lint the workflows themselves (#80): they now carry real logic (release
+# extraction, GHCR pruning) and real privileges (packages/contents write).
+# actionlint checks syntax, expressions, and shellchecks every run: block;
+# zizmor audits for security smells (template injection, credential
+# persistence, over-broad permissions). Offline mode: no token needed.
+name: workflow-lint
+
+on:
+  pull_request:
+    paths: [".github/workflows/**", ".github/dependabot.yml"]
+  push:
+    branches: [main]
+    paths: [".github/workflows/**", ".github/dependabot.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:latest -color
+
+      - name: zizmor
+        run: |
+          pipx install zizmor
+          zizmor --offline .github/workflows/
