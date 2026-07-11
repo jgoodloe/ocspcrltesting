@@ -12,6 +12,10 @@ on:
   schedule:
     - cron: "26 7 * * 2"
 
+# Least privilege at the top; the analyze job declares its own writes.
+permissions:
+  contents: read
+
 jobs:
   analyze:
     name: CodeQL (${{ matrix.language }})

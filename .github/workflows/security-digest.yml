@@ -83,7 +83,7 @@ jobs:
             else
               echo "| severity | tool | rule | location | alert |"
               echo "|---|---|---|---|---|"
-              jq -r '.[] | "| \(.rule.security_severity_level // .rule.severity) | \(.tool.name) | \(.rule.id) | \(.most_recent_instance.location.path // "-") | [#\(.number)](\(.html_url)) |"' <<<"$cs"
+              jq -r '.[] | "| \(.rule.security_severity_level // .rule.severity) | \(.tool.name) | \(.rule.id) | \(.most_recent_instance.location.path // "-"):\(.most_recent_instance.location.start_line // 0) | [#\(.number)](\(.html_url)) |"' <<<"$cs"
             fi
           } > body.md
 
