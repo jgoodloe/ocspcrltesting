@@ -153,7 +153,13 @@ def test_rerun_reuses_config_and_certs(app_client, cert_fixtures):
     assert app_client.get(f"/api/test-runs/{first_id}/results").json()["total"] == 2
     assert app_client.get("/api/test-runs").json()["total"] == 2
 
-    assert app_client.post("/api/test-runs/does-not-exist/rerun").status_code == 404
+    # Malformed run ids are rejected at validation (422); a well-formed but
+    # unknown id is a 404 from the lookup.
+    assert app_client.post("/api/test-runs/does-not-exist/rerun").status_code == 422
+    assert (
+        app_client.post("/api/test-runs/00000000-0000-4000-8000-000000000000/rerun").status_code
+        == 404
+    )
 
 
 def test_ssrf_blocked_url_rejected(app_client, cert_fixtures):

@@ -18,6 +18,7 @@ from sqlalchemy import select
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from ..authz import Principal, authorize_run_view, current_principal, principal_from_websocket
+from .runs import RunID
 from ..db import get_session, session_factory
 from ..jobs import TERMINAL_STATUSES, get_job_manager
 from ..orm import Run, RunEvent
@@ -78,7 +79,7 @@ async def _event_stream(run_id: str, after_seq: int) -> AsyncIterator[dict]:
 
 
 @router.websocket("/test-runs/{run_id}/stream")
-async def stream_ws(websocket: WebSocket, run_id: str, after_seq: int = Query(default=0, ge=0)) -> None:
+async def stream_ws(websocket: WebSocket, run_id: RunID, after_seq: int = Query(default=0, ge=0)) -> None:
     async with session_factory()() as session:
         principal = await principal_from_websocket(websocket, session)
         if principal is None:
@@ -109,7 +110,7 @@ async def stream_ws(websocket: WebSocket, run_id: str, after_seq: int = Query(de
 @router.get("/test-runs/{run_id}/stream/sse")
 async def stream_sse(
     request: Request,
-    run_id: str,
+    run_id: RunID,
     after_seq: int = Query(default=0, ge=0),
     principal: Principal = Depends(current_principal),
     session=Depends(get_session),

@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from typing import Optional
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, Path, Query, Response, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import ValidationError
 from sqlalchemy import func, select
@@ -45,6 +45,12 @@ from .serializers import result_to_schema, run_to_detail, run_to_summary
 logger = logging.getLogger("ocspweb.api.runs")
 
 router = APIRouter(tags=["test-runs"])
+
+# Run ids are always generated server-side as uuid4 (see create_run/rerun_run).
+# Validating the path parameter against that shape rejects malformed ids with
+# a 422 at the boundary, so an attacker-shaped run_id can never reach handler
+# code, logs, or filesystem-path construction.
+RunID = Annotated[str, Path(pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")]
 
 # (slot, single_cert_expected, is_private_key)
 OPTIONAL_CERT_SLOTS = (
@@ -258,7 +264,7 @@ async def create_run(
 
 @router.post("/test-runs/{run_id}/rerun", response_model=RunSummary, status_code=201)
 async def rerun_run(
-    run_id: str,
+    run_id: RunID,
     ctx: WorkspaceContext = Depends(active_workspace(Role.member)),
     session: AsyncSession = Depends(get_session),
 ) -> RunSummary:
@@ -380,7 +386,7 @@ async def rerun_run(
 
     await manager.start_run(new_run_id)
     await session.refresh(run)
-    logger.info("reran run %s as %s -> %s", run_id, new_run_id, str(run_config.ocsp_url).replace("\r", "\\r").replace("\n", "\\n"))
+    logger.info("reran run %s as %s -> %s", str(run_id).replace("\r", "\\r").replace("\n", "\\n"), new_run_id, str(run_config.ocsp_url).replace("\r", "\\r").replace("\n", "\\n"))
     return run_to_summary(run)
 
 
@@ -411,7 +417,7 @@ async def list_runs(
 
 @router.get("/test-runs/{run_id}", response_model=RunDetail)
 async def get_run(
-    run_id: str,
+    run_id: RunID,
     ctx: WorkspaceContext = Depends(active_workspace(Role.viewer)),
     session: AsyncSession = Depends(get_session),
 ) -> RunDetail:
@@ -421,7 +427,7 @@ async def get_run(
 
 @router.get("/test-runs/{run_id}/results", response_model=ResultList)
 async def get_results(
-    run_id: str,
+    run_id: RunID,
     category: Optional[str] = None,
     status: Optional[str] = None,
     q: Optional[str] = None,
@@ -443,7 +449,7 @@ async def get_results(
 
 @router.get("/test-runs/{run_id}/logs", response_model=LogList)
 async def get_logs(
-    run_id: str,
+    run_id: RunID,
     after_seq: int = Query(default=0, ge=0),
     limit: int = Query(default=1000, ge=1, le=10000),
     ctx: WorkspaceContext = Depends(active_workspace(Role.viewer)),
@@ -471,7 +477,7 @@ async def get_logs(
 
 @router.get("/test-runs/{run_id}/export/json")
 async def export_json(
-    run_id: str,
+    run_id: RunID,
     ctx: WorkspaceContext = Depends(active_workspace(Role.viewer)),
     session: AsyncSession = Depends(get_session),
 ) -> JSONResponse:
@@ -495,7 +501,7 @@ async def export_json(
 
 @router.get("/test-runs/{run_id}/export/csv")
 async def export_csv(
-    run_id: str,
+    run_id: RunID,
     ctx: WorkspaceContext = Depends(active_workspace(Role.viewer)),
     session: AsyncSession = Depends(get_session),
 ) -> PlainTextResponse:
@@ -514,7 +520,7 @@ async def export_csv(
 
 @router.post("/test-runs/{run_id}/profile", response_model=ProfileOut, status_code=201)
 async def save_run_as_profile(
-    run_id: str,
+    run_id: RunID,
     payload: RunProfileIn,
     ctx: WorkspaceContext = Depends(active_workspace(Role.member)),
     session: AsyncSession = Depends(get_session),
@@ -544,13 +550,13 @@ async def save_run_as_profile(
     session.add(profile)
     await session.commit()
     await session.refresh(profile)
-    logger.info("saved run %s as profile %r", run_id, str(payload.name).replace("\r", "\\r").replace("\n", "\\n"))
+    logger.info("saved run %s as profile %r", str(run_id).replace("\r", "\\r").replace("\n", "\\n"), str(payload.name).replace("\r", "\\r").replace("\n", "\\n"))
     return _to_out(profile)
 
 
 @router.post("/test-runs/{run_id}/cancel", response_model=RunSummary)
 async def cancel_run(
-    run_id: str,
+    run_id: RunID,
     ctx: WorkspaceContext = Depends(active_workspace(Role.member)),
     session: AsyncSession = Depends(get_session),
 ) -> RunSummary:
@@ -564,7 +570,7 @@ async def cancel_run(
 
 @router.delete("/test-runs/{run_id}", status_code=204)
 async def delete_run(
-    run_id: str,
+    run_id: RunID,
     ctx: WorkspaceContext = Depends(active_workspace(Role.member)),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
