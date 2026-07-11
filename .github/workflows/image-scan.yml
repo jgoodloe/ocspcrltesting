@@ -1,36 +1,44 @@
-# Container image CVE scan (#77): Trivy scans the published `latest` image's
-# OS packages (the Debian layer of python:*-slim) and Python/npm artifacts
-# baked into it, uploading findings to the Security tab. This covers the layer
-# neither CodeQL (our code) nor Dependabot (declared deps + base-image tags)
-# watches: distro package CVEs that arrive without any change to this repo.
+# Container and config scanning (#77): three scans that cover what neither
+# CodeQL (our code) nor Dependabot (declared deps + base-image tags) watches.
 #
-# ignore-unfixed keeps the signal actionable — a finding appears only when
-# Debian has shipped a fixed package, i.e. when rebuilding the image helps.
+#   trivy-image  — OS packages inside the published `latest` image (the
+#                  Debian layer of python:*-slim). ignore-unfixed keeps the
+#                  signal actionable: findings appear only once Debian ships
+#                  a fixed package, i.e. when rebuilding actually helps.
+#   trivy-config — IaC misconfigurations in the Dockerfile and
+#                  docker-compose.yml (privileged containers, missing
+#                  healthchecks, root users, ...).
+#   hadolint     — Dockerfile best-practice linting (unpinned bases, RUN
+#                  hygiene, apt cache handling).
+#
+# All three upload SARIF to the Security tab under their own category.
+# Official tool containers are used instead of marketplace actions: fewer
+# third-party dependencies to hash-pin and audit.
 name: image-scan
 
 on:
   schedule:
     - cron: "31 6 * * 1"
-  # Re-scan promptly when the image contents change.
+  # Re-scan promptly when the scanned artifacts change.
   push:
     branches: [main]
     paths:
       - Dockerfile
+      - docker-compose.yml
       - backend/requirements.txt
       - .github/workflows/image-scan.yml
   workflow_dispatch:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
-  trivy:
+  trivy-image:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
-      # Official trivy container instead of the marketplace action: fewer
-      # third-party moving parts, and the image tag is one thing to pin in
-      # the #80 pinning pass (digest-pin aquasec/trivy alongside the actions).
       - name: Scan ghcr latest image
         run: |
           docker run --rm -v "$PWD:/out" aquasec/trivy:latest image \
@@ -43,3 +51,36 @@ jobs:
         with:
           sarif_file: trivy.sarif
           category: trivy-image
+
+  config-lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Trivy config scan (Dockerfile, docker-compose)
+        run: |
+          docker run --rm -v "$PWD:/repo" aquasec/trivy:latest config \
+            --format sarif --output /repo/trivy-config.sarif /repo
+
+      - name: Upload trivy config results
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-config
+
+      - name: Hadolint (Dockerfile lint)
+        # --no-fail: findings belong in the Security tab, not a red run.
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo hadolint/hadolint \
+            hadolint --format sarif --no-fail Dockerfile > hadolint.sarif
+
+      - name: Upload hadolint results
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
+        with:
+          sarif_file: hadolint.sarif
+          category: hadolint
