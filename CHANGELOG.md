@@ -3,6 +3,42 @@
 All notable changes to this project are documented here. This project adheres
 to [Semantic Versioning](https://semver.org/).
 
+## v1.2.0 — Security hardening and supply-chain trust
+
+### Fixed
+
+- **Federal PKI responder detection** matched agency domains as URL
+  substrings, so a hostname like `evildhs.gov.example.com` (or a `dhs.gov`
+  path segment) was misclassified as a DHS responder. Detection now parses
+  the URL hostname and requires an exact or subdomain match.
+
+### Changed
+
+- **Run ids are validated at the API boundary**: every `/api/test-runs/{id}`
+  route (including streams, cancel, delete, and exports) now rejects
+  malformed ids with a **422** before any handler code runs; well-formed but
+  unknown ids still return 404. Run ids have always been server-generated
+  UUIDs, so no valid client is affected.
+- User-supplied values (URLs, profile names, run ids, worker-derived status)
+  are CR/LF-escaped before logging, so crafted input cannot forge log lines.
+- Dependency floors raised past all published 2025-26 advisories
+  (authlib 1.6.12, starlette 1.3.1, python-multipart 0.0.31; pytest 9 for
+  the dev suite).
+
+### Supply chain & CI
+
+- Published images now carry **SLSA provenance and an SPDX SBOM**, and
+  `main`/tag images get a GitHub-signed attestation — verify with
+  `gh attestation verify oci://ghcr.io/jgoodloe/ocspcrltesting:1.2.0 --owner jgoodloe`.
+- Docker base images are digest-pinned and every GitHub Action is pinned to
+  a commit SHA, with pinning enforced in CI from now on (zizmor).
+- New scanners reporting to the Security tab: **Trivy** (image OS packages +
+  IaC misconfigurations), **hadolint** (Dockerfile), **OpenSSF Scorecard**
+  (repo posture), **zizmor** (workflow security), alongside CodeQL now on
+  the `security-extended` suite.
+- A daily **security digest** mirrors all open alerts into a single tracked
+  issue; green Dependabot minor/patch updates **auto-merge** after CI.
+
 ## v1.1.0 — Runtime, dependency, and automation refresh
 
 ### Dependencies & runtimes
