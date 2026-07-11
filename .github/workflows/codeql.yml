@@ -26,6 +26,8 @@ jobs:
         language: [python, javascript-typescript]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: github/codeql-action/init@v4
         with:
@@ -33,6 +35,10 @@ jobs:
           # Both languages analyze without a build; the frontend bundle and
           # pip install are not needed for scanning.
           build-mode: none
+          # security-extended (#81): accepts more lower-confidence queries in
+          # exchange for deeper security coverage — the right trade for a
+          # codebase whose risks are SSRF, subprocess injection, and auth.
+          queries: security-extended
 
       - uses: github/codeql-action/analyze@v4
         with:
