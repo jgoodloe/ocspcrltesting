@@ -22,9 +22,10 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/v') }}
 
+# Least privilege by default; jobs that publish (image, release) declare
+# their own write scopes.
 permissions:
   contents: read
-  packages: write
 
 jobs:
   test:
@@ -39,6 +40,8 @@ jobs:
         python: ["3.10", "3.12", "3.14"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -80,8 +83,16 @@ jobs:
     # code) and never from the weekly scheduled canary run, which only tests.
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # For the GitHub-signed provenance attestation (#78).
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: docker/setup-qemu-action@v3
 
@@ -121,6 +132,7 @@ jobs:
             type=raw,value=${{ steps.branch.outputs.tag }},enable=${{ steps.branch.outputs.tag != '' }}
 
       - name: Build and push
+        id: push
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -134,6 +146,22 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Supply-chain metadata (#78): BuildKit attaches SLSA provenance and
+          # an SPDX SBOM to the image manifest, so `docker buildx imagetools
+          # inspect` (and scanners) can see exactly what went in and how.
+          provenance: mode=max
+          sbom: true
+
+      # GitHub-signed provenance for release-grade refs only (#78) — verify
+      # with: gh attestation verify oci://ghcr.io/<repo>:<tag> --owner jgoodloe
+      # Branch preview images are throwaway and skip this.
+      - name: Attest build provenance
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
 
   release:
     name: Publish GitHub Release
@@ -148,6 +176,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Extract release notes from CHANGELOG.md
         run: |
