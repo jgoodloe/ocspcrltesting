@@ -155,7 +155,13 @@ def test_save_run_as_profile(app_client, cert_fixtures):
     dup = app_client.post(f"/api/test-runs/{run_id}/profile", json={"name": "From run"})
     assert dup.status_code == 409
 
-    missing = app_client.post("/api/test-runs/does-not-exist/profile", json={"name": "x"})
+    # Malformed run ids are rejected at validation (422); a well-formed but
+    # unknown id is a 404 from the lookup.
+    malformed = app_client.post("/api/test-runs/does-not-exist/profile", json={"name": "x"})
+    assert malformed.status_code == 422
+    missing = app_client.post(
+        "/api/test-runs/00000000-0000-4000-8000-000000000000/profile", json={"name": "x"}
+    )
     assert missing.status_code == 404
 
 
