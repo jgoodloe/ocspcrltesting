@@ -11,6 +11,12 @@
 # No checkout and no third-party actions: pure GitHub API via the runner's
 # gh CLI, so there is nothing to hash-pin (#80) and no workspace to leak
 # credentials into.
+#
+# Dependabot alerts: GITHUB_TOKEN cannot read them (GitHub limitation — the
+# workflow permissions model has no dependabot-alerts scope). To include
+# them, add a repo secret SECURITY_DIGEST_TOKEN: a fine-grained PAT for this
+# repository with ONLY "Dependabot alerts: read" (+ metadata). Without the
+# secret the digest still runs and links the Dependabot tab instead.
 name: security-digest
 
 on:
@@ -28,6 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DEPENDABOT_TOKEN: ${{ secrets.SECURITY_DIGEST_TOKEN }}
       GH_REPO: ${{ github.repository }}
     steps:
       - name: Build and publish digest
@@ -39,8 +46,10 @@ jobs:
           # Code scanning 404s until the first analysis exists -> treat as [].
           cs=$(gh api --paginate "repos/$repo/code-scanning/alerts?state=open&per_page=100" 2>/dev/null | jq -s 'add // []' || echo '[]')
 
+          # Dependabot alerts need the optional fine-grained PAT (see header);
+          # fall back gracefully when it's absent or lacks access.
           dep='[]'; dep_ok=true
-          if ! dep=$(gh api --paginate "repos/$repo/dependabot/alerts?state=open&per_page=100" 2>/dev/null | jq -s 'add // []'); then
+          if ! dep=$(GH_TOKEN="${DEPENDABOT_TOKEN:-$GH_TOKEN}" gh api --paginate "repos/$repo/dependabot/alerts?state=open&per_page=100" 2>/dev/null | jq -s 'add // []'); then
             dep='[]'; dep_ok=false
           fi
 
