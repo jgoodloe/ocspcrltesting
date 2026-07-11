@@ -1,18 +1,7 @@
 # zizmor configuration for the workflow-lint job (#80).
 rules:
-  # Hash-pinning every action needs the upstream tag->SHA mapping and is
-  # tracked as a one-time pass in #80; don't fail CI on it until that lands.
-  # REMOVE this ignore once actions are pinned so regressions are caught.
-  unpinned-uses:
-    ignore:
-      - build.yml
-      - codeql.yml
-      - dependabot-auto-merge.yml
-      - dependency-review.yml
-      - ghcr-prune.yml
-      - image-scan.yml
-      - scorecard.yml
-      - workflow-lint.yml
+  # All actions are hash-pinned (#80); zizmor now enforces that any new or
+  # edited `uses:` is pinned too. Dependabot keeps the SHAs fresh.
 
   # pip/npm/buildx caches in build.yml: GitHub's cache scoping isolates PR
   # caches from main/tag runs (a PR cache can never be read by a release
