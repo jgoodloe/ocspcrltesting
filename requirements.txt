@@ -1,8 +1,8 @@
 # Core dependencies for the OCSP test engine (ocsp_tester package).
 # Floors held at the patched releases (cryptography CVE-2024-26130 /
 # CVE-2024-6119; requests CVE-2024-35195 / CVE-2024-47081).
-cryptography>=43.0.1,<45.0.0
-requests>=2.32.4,<3.0.0
+cryptography>=49.0.0,<50.0.0
+requests>=2.34.2,<3.0.0
 asn1crypto>=1.5.1,<2.0.0
 
 # Web application (FastAPI backend) dependencies live in backend/requirements.txt

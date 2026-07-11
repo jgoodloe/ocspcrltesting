@@ -22,12 +22,29 @@ updates:
       cli-minor-patch:
         update-types: ["minor", "patch"]
 
-  # React frontend.
+  # React frontend. The react and vite families are peer-coupled — bumping
+  # one member alone breaks `npm ci` (e.g. @types/react 19 against
+  # @types/react-dom 18, or @vitejs/plugin-react 6 against vite 5) — so they
+  # are grouped across ALL update types to always arrive as one coherent PR.
+  # A dependency joins the first group it matches, so these precede the
+  # catch-all minor/patch group.
   - package-ecosystem: npm
     directory: "/frontend"
     schedule:
       interval: weekly
     groups:
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+        update-types: ["major", "minor", "patch"]
+      vite:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+        update-types: ["major", "minor", "patch"]
       frontend-minor-patch:
         update-types: ["minor", "patch"]
 
