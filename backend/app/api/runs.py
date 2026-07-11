@@ -42,6 +42,8 @@ from .catalog import load_global_selection
 from .certs import read_limited_upload
 from .serializers import result_to_schema, run_to_detail, run_to_summary
 
+from ..logging_config import log_safe
+
 logger = logging.getLogger("ocspweb.api.runs")
 
 router = APIRouter(tags=["test-runs"])
@@ -252,7 +254,7 @@ async def create_run(
 
     await manager.start_run(run_id)
     await session.refresh(run)
-    logger.info("created run %s -> %s", run_id, run_config.ocsp_url)
+    logger.info("created run %s -> %s", run_id, log_safe(run_config.ocsp_url))
     return run_to_summary(run)
 
 
@@ -380,7 +382,7 @@ async def rerun_run(
 
     await manager.start_run(new_run_id)
     await session.refresh(run)
-    logger.info("reran run %s as %s -> %s", run_id, new_run_id, run_config.ocsp_url)
+    logger.info("reran run %s as %s -> %s", run_id, new_run_id, log_safe(run_config.ocsp_url))
     return run_to_summary(run)
 
 
@@ -544,7 +546,7 @@ async def save_run_as_profile(
     session.add(profile)
     await session.commit()
     await session.refresh(profile)
-    logger.info("saved run %s as profile %r", run_id, payload.name)
+    logger.info("saved run %s as profile %r", run_id, log_safe(payload.name))
     return _to_out(profile)
 
 

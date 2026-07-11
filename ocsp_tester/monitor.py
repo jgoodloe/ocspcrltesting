@@ -1338,18 +1338,25 @@ class OCSPMonitor:
         }
         
         try:
-            # Check URL patterns
-            if "dhs.gov" in ocsp_url.lower() or "dimc.dhs.gov" in ocsp_url.lower():
+            # Check URL patterns. Match on the parsed hostname, not a
+            # substring of the whole URL: "dhs.gov" in url would also match
+            # http://evildhs.gov.example.com/ or a dhs.gov path segment.
+            host = (urlparse(ocsp_url).hostname or "").lower()
+
+            def _host_under(domain: str) -> bool:
+                return host == domain or host.endswith("." + domain)
+
+            if _host_under("dhs.gov"):
                 federal_info["is_federal_pki"] = True
                 federal_info["agency"] = "DHS"
                 federal_info["characteristics"].append("DHS OCSP responder")
-            
-            if "dod.mil" in ocsp_url.lower():
+
+            if _host_under("dod.mil"):
                 federal_info["is_federal_pki"] = True
                 federal_info["agency"] = "DoD"
                 federal_info["characteristics"].append("DoD OCSP responder")
-            
-            if "treasury.gov" in ocsp_url.lower():
+
+            if _host_under("treasury.gov"):
                 federal_info["is_federal_pki"] = True
                 federal_info["agency"] = "Treasury"
                 federal_info["characteristics"].append("Treasury OCSP responder")
