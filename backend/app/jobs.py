@@ -28,8 +28,6 @@ from .orm import Result, Run, RunEvent, utcnow
 from .settings import Settings, get_settings
 from .storage import RunWorkspace
 
-from .logging_config import log_safe
-
 logger = logging.getLogger("ocspweb.jobs")
 
 TERMINAL_STATUSES = {"completed", "failed", "cancelled", "timed_out"}
@@ -285,7 +283,7 @@ class JobManager:
             try:
                 await self._persist_result(run_id, result)
             except Exception:
-                logger.exception("run %s: failed to persist result %r", run_id, result.get("id"))
+                logger.exception("run %s: failed to persist result %r", run_id, str(result.get("id")).replace("\r", "\\r").replace("\n", "\\n"))
             await self._append_event(run_id, "result", result)
         elif etype == "progress":
             await self._update_run(run_id, current_activity=data.get("current_activity"))
@@ -372,7 +370,7 @@ class JobManager:
         await self._update_run(run_id, **fields)
         await self._append_event(run_id, "run_status", await self._run_snapshot(run_id))
         self.notifier.signal(run_id)
-        logger.info("run %s finished with status %s", run_id, log_safe(status))
+        logger.info("run %s finished with status %s", run_id, str(status).replace("\r", "\\r").replace("\n", "\\n"))
 
     async def _run_snapshot(self, run_id: str) -> Dict[str, Any]:
         from .api.serializers import run_to_summary  # local import to avoid a cycle

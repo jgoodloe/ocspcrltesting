@@ -24,10 +24,12 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   prune:
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-latest
     # Tag deletions also fire the `delete` event; only branch deletions map to
     # preview images.

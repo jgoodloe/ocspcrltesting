@@ -8,11 +8,10 @@ import sys
 from datetime import datetime, timezone
 
 
-def log_safe(value: object) -> str:
-    """Escape CR/LF so a user-supplied value (URL, name, path parameter)
-    cannot forge additional log lines when interpolated into a message."""
-    return str(value).replace("\r", "\\r").replace("\n", "\\n")
-
+# Note: user-supplied values are CR/LF-escaped inline at each logging call
+# site (str(v).replace("\r", ...).replace("\n", ...)) rather than through a
+# shared helper — CodeQL's log-injection query only recognizes the
+# sanitizer when applied directly to the value flowing into the logger.
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
