@@ -18,6 +18,11 @@ permissions:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # zizmor findings also go to the Security tab (SARIF), so they get
+      # history and dismissal tracking like every other scanner here.
+      security-events: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -26,7 +31,26 @@ jobs:
       - name: actionlint
         run: docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:latest -color
 
-      - name: zizmor
+      - name: zizmor (SARIF for the Security tab)
+        id: zizmor
+        # Capture the exit code instead of failing here so the SARIF still
+        # uploads on findings; the final step restores the red-check gate.
         run: |
           pipx install zizmor
-          zizmor --offline .github/workflows/
+          set +e
+          zizmor --offline --format sarif .github/workflows/ > zizmor.sarif
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          set -e
+
+      - name: Upload zizmor results
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
+        with:
+          sarif_file: zizmor.sarif
+          category: zizmor
+
+      - name: Fail on zizmor findings
+        if: steps.zizmor.outputs.exit != '0'
+        run: |
+          zizmor --offline .github/workflows/ || true
+          echo "::error::zizmor reported findings (see log above and the Security tab)"
+          exit 1
