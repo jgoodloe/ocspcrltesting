@@ -5,6 +5,15 @@ to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Dependencies & runtimes
+
+- Docker image now builds on **Python 3.14** (`python:3.14-slim`) and
+  **Node 26** (`node:26-alpine`); CI tests the same runtimes.
+- **cryptography 49**, SQLAlchemy/uvicorn/aiosqlite/requests and friends
+  raised to current releases.
+- Frontend: **react-router-dom 7** (verified under subpath deployment),
+  **TypeScript 7**.
+
 ### Project infrastructure
 
 - Dependabot updates for pip, npm, Docker base images, and GitHub Actions (#41).
