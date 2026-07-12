@@ -43,7 +43,7 @@ export function Login() {
             <path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z" />
             <path d="M9 12l2 2 4-4" />
           </svg>
-          <span>OCSP Testing</span>
+          <span>OCSP CRL Testing</span>
         </div>
         <h1 className="page-title">Sign in</h1>
 

@@ -11,5 +11,8 @@ def test_health(app_client):
 
 def test_version(app_client):
     body = app_client.get("/api/version").json()
-    assert body["name"] == "ocsp-testing-web"
+    from backend.app import APP_NAME, __version__
+
+    assert body["name"] == APP_NAME
+    assert body["version"] == __version__
     assert body["engine"] == "ocsp_tester"
