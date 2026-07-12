@@ -1,4 +1,4 @@
-"""OCSP Testing Web backend."""
+"""OCSP CRL Testing Web backend."""
 
-__version__ = "1.0.0"
-APP_NAME = "ocsp-testing-web"
+__version__ = "1.2.0"
+APP_NAME = "ocsp-crl-testing-web"

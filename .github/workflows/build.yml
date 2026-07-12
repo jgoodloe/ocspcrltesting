@@ -179,6 +179,17 @@ jobs:
         with:
           persist-credentials: false
 
+      # The footer/API version comes from backend/app/__init__.py; fail the
+      # release loudly if the tag was pushed without bumping it, so a stale
+      # version string can never ship (it did for v1.1.0/v1.2.0).
+      - name: Check version constant matches tag
+        run: |
+          pkg=$(python3 -c "import re; print(re.search(r'__version__ = \"([^\"]+)\"', open('backend/app/__init__.py').read()).group(1))")
+          if [ "v$pkg" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::backend/app/__init__.py has __version__=$pkg but the tag is $GITHUB_REF_NAME — bump the constant and re-tag"
+            exit 1
+          fi
+
       - name: Extract release notes from CHANGELOG.md
         run: |
           # Grab everything between "## <tag>" (e.g. "## v1.0.0 — ...") and

@@ -110,7 +110,7 @@ export function App() {
       <aside className="sidebar">
         <div className="sidebar-brand">
           {ICONS.shield}
-          OCSP Testing
+          OCSP CRL Testing
         </div>
         <nav className="sidebar-nav" aria-label="Main">
           <NavLink to="/" end className={linkClass}>
