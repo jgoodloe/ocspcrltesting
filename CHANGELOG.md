@@ -3,13 +3,15 @@
 All notable changes to this project are documented here. This project adheres
 to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## v1.2.1 — UI naming and version reporting
 
 - The UI is now titled **OCSP CRL Testing** (sidebar, login, page title),
-  and the footer version comes from the single backend constant.
+  and the footer/API version now reports the real release (every prior
+  release displayed `v1.0.0`).
 - Releases now **fail if the version constant was not bumped** to match the
-  tag, so the footer/API can never report a stale version again (v1.1.0 and
-  v1.2.0 shipped reporting 1.0.0).
+  tag, so a stale version string can never ship again.
+- New README with a full project tour and screenshots captured from a live
+  seeded instance.
 
 ## v1.2.0 — Security hardening and supply-chain trust
 
