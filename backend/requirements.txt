@@ -36,6 +36,6 @@ psycopg2-binary>=2.9.12,<3.0.0
 # previously admitted versions with JWT/JWS handling flaws incl. the
 # algorithm-confusion CVE-2024-37568 (OIDC ID-token forgery when SSO is on).
 authlib>=1.6.12,<2.0.0
-httpx>=0.27.0,<1.0.0
+httpx>=0.28.1,<1.0.0
 passlib[argon2]>=1.7.4,<2.0.0
 itsdangerous>=2.2.0,<3.0.0
