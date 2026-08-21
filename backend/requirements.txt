@@ -3,7 +3,7 @@
 # (cryptography CVE-2024-26130 + bundled-OpenSSL CVE-2024-6119; requests
 # CVE-2024-35195/CVE-2024-47081; authlib/starlette/python-multipart 2025-26
 # advisories — floors at each package's last fixed release).
-cryptography>=49.0.0,<50.0.0
+cryptography>=50.0.0,<51.0.0
 requests>=2.34.2,<3.0.0
 asn1crypto>=1.5.1,<2.0.0
 
