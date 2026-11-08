@@ -5,6 +5,15 @@ to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+- **Release CVE gate**: every tagged release image is scanned for fixable
+  critical/high CVEs before the GitHub Release publishes. Clean releases
+  ship automatically; findings pause the release in the `release-approval`
+  environment for a human approve/reject, with an issue listing the CVEs.
+- **Self-healing images**: the weekly scan dispatches a rebuild of `latest`
+  when fixable critical CVEs appear (pip re-resolves patched packages; a new
+  `apt-get upgrade` layer pulls patched Debian packages), and every
+  published image is re-scanned immediately after it builds.
+
 - **One-click releases**: a manually-triggered `release-cut` workflow bumps
   the version, sections the CHANGELOG, and opens an auto-merging prep PR;
   on merge, `release-tag` pushes the tag and the existing pipeline ships
