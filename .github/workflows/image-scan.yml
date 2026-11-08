@@ -47,7 +47,7 @@ jobs:
             ghcr.io/${{ github.repository }}:latest
 
       - name: Upload results to code scanning
-        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
         with:
           sarif_file: trivy.sarif
           category: trivy-image
@@ -68,7 +68,7 @@ jobs:
             --format sarif --output /repo/trivy-config.sarif /repo
 
       - name: Upload trivy config results
-        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
         with:
           sarif_file: trivy-config.sarif
           category: trivy-config
@@ -80,7 +80,7 @@ jobs:
             hadolint --format sarif --no-fail Dockerfile > hadolint.sarif
 
       - name: Upload hadolint results
-        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
         with:
           sarif_file: hadolint.sarif
           category: hadolint

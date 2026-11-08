@@ -15,3 +15,10 @@ rules:
   superfluous-actions:
     ignore:
       - build.yml
+
+  # workflow_run is privileged, but ci-health checks out nothing, executes
+  # no code from the triggering ref, and passes event fields via env — it
+  # only reads the run's conclusion and files/closes an issue.
+  dangerous-triggers:
+    ignore:
+      - ci-health.yml
