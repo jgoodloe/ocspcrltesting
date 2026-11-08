@@ -22,3 +22,6 @@ rules:
   dangerous-triggers:
     ignore:
       - ci-health.yml
+      # workflow_run here only gates on the triggering run's conclusion; the
+      # jobs check out main (not the triggering ref) and run no PR code.
+      - image-scan.yml

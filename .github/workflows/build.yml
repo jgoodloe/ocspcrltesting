@@ -163,14 +163,85 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
+  # Release CVE gate: scan the just-pushed release image for FIXABLE
+  # critical/high CVEs (OS packages and bundled Python packages alike).
+  # Clean -> the release publishes untouched. Findings -> a release-gate
+  # issue lists them and the release waits in the `release-approval`
+  # environment for a human decision: approve the pending deployment to ship
+  # anyway, reject it to hold the release (the tag and images already exist;
+  # fix, bump, and re-tag instead).
+  #
+  # ONE-TIME SETUP for the pause to work: Settings → Environments → New
+  # environment `release-approval` → Required reviewers → add yourself.
+  # Without that protection the approval job passes straight through.
+  release-gate:
+    name: Release CVE gate
+    needs: image
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    outputs:
+      clean: ${{ steps.scan.outputs.clean }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Scan release image for fixable CRITICAL/HIGH CVEs
+        id: scan
+        run: |
+          set -euo pipefail
+          ver="${GITHUB_REF_NAME#v}"
+          img="ghcr.io/$GH_REPO:$ver"
+          docker run --rm -v "$PWD:/out" aquasec/trivy:latest image \
+            --severity CRITICAL,HIGH --ignore-unfixed \
+            --format json --output /out/gate.json "$img"
+          count=$(jq '[.Results[]?.Vulnerabilities[]?] | length' gate.json)
+          echo "fixable CRITICAL/HIGH findings in $img: $count"
+          if [ "$count" -eq 0 ]; then
+            echo "clean=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "clean=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "The release gate found **$count fixable CRITICAL/HIGH** vulnerabilities in \`$img\`:"
+            echo
+            echo '| CVE | severity | package | installed | fixed in |'
+            echo '|---|---|---|---|---|'
+            jq -r '[.Results[]?.Vulnerabilities[]? | "| \(.VulnerabilityID) | \(.Severity) | \(.PkgName) | \(.InstalledVersion) | \(.FixedVersion // "?") |"] | unique | .[]' gate.json
+            echo
+            echo "The GitHub Release for \`$GITHUB_REF_NAME\` is **paused** awaiting your decision in the run's *release-approval* deployment review: approve to publish anyway, reject to hold. The image tags already exist on GHCR either way — to ship clean, fix the dependency, bump, and cut a new release."
+          } > issue.md
+          gh label create release-gate --description "Release held by the CVE gate" --color B60205 --force
+          gh issue create --title "Release $GITHUB_REF_NAME held: fixable CVEs in the image" \
+            --body-file issue.md --label release-gate
+
+  # Pauses for manual review ONLY when the gate found something, thanks to
+  # the environment's required reviewer. GitHub notifies you natively about
+  # the pending deployment review, in addition to the release-gate issue.
+  release-approval:
+    name: Release decision (CVEs found)
+    needs: release-gate
+    if: startsWith(github.ref, 'refs/tags/v') && needs.release-gate.outputs.clean != 'true'
+    runs-on: ubuntu-latest
+    environment: release-approval
+    steps:
+      - name: Record the decision
+        run: echo "Release approved manually despite the gate findings."
+
   release:
     name: Publish GitHub Release
     # Automated release on version tags (#44): the release body is the tag's
     # section from CHANGELOG.md (the curated source of truth), plus the GHCR
     # pull line for the image this same run just published. Runs only after
-    # the image publish succeeds so a release never points at a missing tag.
-    needs: image
-    if: startsWith(github.ref, 'refs/tags/v')
+    # the image publish succeeds AND the CVE gate passed (or you approved
+    # the flagged release in the release-approval environment).
+    needs: [image, release-gate, release-approval]
+    if: >-
+      !cancelled() && startsWith(github.ref, 'refs/tags/v') &&
+      needs.release-gate.result == 'success' &&
+      (needs.release-gate.outputs.clean == 'true' || needs.release-approval.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -14,6 +14,12 @@ FROM python:3.14-slim@sha256:caaf356f40667c496d405780745b9ac25771c189a51dfcc4243
 # image drops it — in that case add `apt-get install -y openssl` here.
 # (OCSP POST probes use the requests library, not the curl binary, so curl is
 # intentionally NOT required at runtime.)
+# Pull Debian security patches newer than the pinned base digest, so any
+# rebuild (including the CVE-triggered weekly rebuild) ships fixed OS
+# packages without waiting for an upstream base rebuild + digest bump.
+# hadolint ignore=DL3005
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
 RUN openssl version
 
 WORKDIR /app
