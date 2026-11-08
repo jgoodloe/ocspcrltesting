@@ -1,6 +1,15 @@
 services:
   app:
     build: .
+    # Unattended updates (optional): run the published image instead of a
+    # local build — comment out `build:`, uncomment `image:` (a minor line
+    # like :1.2 tracks patch releases; :latest tracks every main merge) —
+    # and start the stack with:  docker compose --profile auto-update up -d
+    # Watchtower (below) then pulls new images daily and restarts only this
+    # service.
+    # image: ghcr.io/jgoodloe/ocspcrltesting:latest
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     restart: unless-stopped
     depends_on:
       db:
@@ -57,6 +66,19 @@ services:
       # (http://host:8080/ocsp/) mount nginx/subpath.conf instead and set
       # OCSPWEB_BASE_PATH=/ocsp on the app service.
       - ./nginx/root.conf:/etc/nginx/conf.d/default.conf:ro
+
+  # Opt-in auto-updater: daily checks GHCR and restarts `app` when its image
+  # tag has a new digest. --label-enable scopes it to services carrying the
+  # watchtower.enable label, so postgres/nginx are never touched; --cleanup
+  # removes superseded images. Inactive unless the stack is started with
+  # `docker compose --profile auto-update up -d`.
+  watchtower:
+    image: containrrr/watchtower:1.7.1
+    restart: unless-stopped
+    profiles: ["auto-update"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --label-enable --cleanup --interval 86400
 
 volumes:
   ocsp_data:

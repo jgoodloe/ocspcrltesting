@@ -3,6 +3,20 @@
 All notable changes to this project are documented here. This project adheres
 to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- **One-click releases**: a manually-triggered `release-cut` workflow bumps
+  the version, sections the CHANGELOG, and opens an auto-merging prep PR;
+  on merge, `release-tag` pushes the tag and the existing pipeline ships
+  images and the GitHub Release.
+- **Opt-in unattended host updates**: a Watchtower service in
+  docker-compose (`--profile auto-update`) pulls new app images daily when
+  running the published GHCR image.
+- **CI-health watchdog**: a red `build` run on `main` now opens a
+  `ci-health` issue (closed automatically on the next green run), after a
+  SQLAlchemy 2.1 greenlet regression silently held the update queue for
+  six weeks. Fixed via the `SQLAlchemy[asyncio]` extra.
+
 ## v1.2.1 — UI naming and version reporting
 
 - The UI is now titled **OCSP CRL Testing** (sidebar, login, page title),

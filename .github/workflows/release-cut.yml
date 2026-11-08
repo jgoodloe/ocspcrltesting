@@ -1,0 +1,99 @@
+# One-click release, stage 1 of 2 (the human decision stays human: this
+# only ever runs when you press "Run workflow" and pick a bump).
+#
+# It bumps backend/app/__init__.py, turns the CHANGELOG's "## Unreleased"
+# section into the release section (or writes a stub if there is none),
+# pushes a release-prep branch, opens a PR, and arms auto-merge. When that
+# PR lands on main, release-tag.yml pushes the tag and the existing build
+# pipeline ships images + the GitHub Release.
+#
+# Requirements (one-time, repo settings):
+#   - Settings → Actions → General → "Allow GitHub Actions to create and
+#     approve pull requests" must be ON (the PR-creation step says so if not).
+#   - release-tag.yml needs the RELEASE_TOKEN secret (see that file).
+name: release-cut
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Semver bump for this release"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: read
+
+jobs:
+  prep:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      BUMP: ${{ inputs.bump }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Bump version and section the CHANGELOG
+        id: ver
+        run: |
+          set -euo pipefail
+          cur=$(python3 -c "import re; print(re.search(r'__version__ = \"([^\"]+)\"', open('backend/app/__init__.py').read()).group(1))")
+          new=$(python3 - "$cur" "$BUMP" <<'PY'
+          import sys
+          major, minor, patch = map(int, sys.argv[1].split("."))
+          bump = sys.argv[2]
+          if bump == "major": major, minor, patch = major + 1, 0, 0
+          elif bump == "minor": minor, patch = minor + 1, 0
+          else: patch += 1
+          print(f"{major}.{minor}.{patch}")
+          PY
+          )
+          echo "Releasing $cur -> $new"
+          python3 - "$cur" "$new" <<'PY'
+          import re, sys, datetime
+          cur, new = sys.argv[1], sys.argv[2]
+          f = "backend/app/__init__.py"
+          s = open(f).read().replace(f'__version__ = "{cur}"', f'__version__ = "{new}"')
+          open(f, "w").write(s)
+          f = "CHANGELOG.md"
+          s = open(f).read()
+          heading = f"## v{new}"
+          if "## Unreleased" in s:
+              s = s.replace("## Unreleased", heading, 1)
+          else:
+              # The release job refuses to ship without a section, so write a
+              # stub pointing at the compare view for this release.
+              stub = (f"{heading}\n\n- Dependency updates and maintenance since v{cur} — see the\n"
+                      f"  [commit history](https://github.com/jgoodloe/ocspcrltesting/compare/v{cur}...v{new}).\n\n")
+              s = re.sub(r"(?m)^## v", stub + "## v", s, count=1)
+          open(f, "w").write(s)
+          PY
+          echo "version=$new" >> "$GITHUB_OUTPUT"
+
+      - name: Push release-prep branch and open auto-merging PR
+        env:
+          NEW: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "release-prep/v$NEW"
+          git add backend/app/__init__.py CHANGELOG.md
+          git commit -m "Prepare release v$NEW"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth" \
+            push origin "HEAD:refs/heads/release-prep/v$NEW"
+          if ! gh pr create --base main --head "release-prep/v$NEW" \
+               --title "Prepare release v$NEW" \
+               --body "Automated release prep (version bump + CHANGELOG section). When this merges, release-tag.yml pushes the v$NEW tag and the build pipeline publishes images and the GitHub Release."; then
+            echo "::error::Could not open the PR — enable 'Allow GitHub Actions to create and approve pull requests' under Settings → Actions → General, then re-run."
+            exit 1
+          fi
+          gh pr merge --auto --rebase "release-prep/v$NEW"
