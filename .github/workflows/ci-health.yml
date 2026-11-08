@@ -1,0 +1,67 @@
+# CI health watchdog: the gap this closes was real — main's CI went red in
+# late September (SQLAlchemy 2.1 greenlet fallout) and the only signal was
+# easy-to-miss Actions emails, so auto-merge silently held six weeks of
+# Dependabot PRs. Now a red `build` run on main (pushes AND the weekly
+# canary) opens/updates a `ci-health` issue, and the next green run closes
+# it — the same single-tracked-issue pattern as the security digest.
+#
+# workflow_run is a privileged trigger, but this job checks out nothing and
+# runs no code from the triggering ref; it only reads the run's conclusion
+# and posts an issue. All event fields are passed via env, not interpolated
+# into the script.
+name: ci-health
+
+on:
+  workflow_run:
+    workflows: [build]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+      RUN_EVENT: ${{ github.event.workflow_run.event }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Open, update, or close the ci-health issue
+        run: |
+          set -euo pipefail
+          gh label create ci-health --description "Automated CI failure tracking for main" --color D93F0B --force
+          existing=$(gh issue list --label ci-health --state open --json number --jq '.[0].number // empty')
+
+          case "$CONCLUSION" in
+            success)
+              if [ -n "$existing" ]; then
+                gh issue close "$existing" --comment "main is green again: $RUN_URL"
+                echo "Closed ci-health issue #$existing"
+              else
+                echo "Green and no open issue — nothing to do."
+              fi
+              ;;
+            failure|timed_out|startup_failure)
+              body="The \`build\` workflow failed on \`main\` (\`$RUN_EVENT\` run at \`$HEAD_SHA\`): $RUN_URL
+
+          While this stays red, Dependabot auto-merge holds every update PR, so fixing it is what keeps the repo self-updating. This issue closes itself on the next green run."
+              if [ -n "$existing" ]; then
+                gh issue comment "$existing" --body "Still failing (\`$RUN_EVENT\`): $RUN_URL"
+                echo "Updated ci-health issue #$existing"
+              else
+                gh issue create --title "CI is failing on main" --body "$body" --label ci-health
+                echo "Opened ci-health issue"
+              fi
+              ;;
+            *)
+              echo "Conclusion '$CONCLUSION' — ignoring."
+              ;;
+          esac
