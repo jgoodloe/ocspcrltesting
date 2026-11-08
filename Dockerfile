@@ -1,5 +1,5 @@
 # ---- Stage 1: build the React frontend -------------------------------------
-FROM node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951032d7ac1a66 AS frontend
+FROM node:26-alpine@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80 AS frontend
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci || npm install
@@ -7,7 +7,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ---- Stage 2: Python runtime ------------------------------------------------
-FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1
+FROM python:3.14-slim@sha256:caaf356f40667c496d405780745b9ac25771c189a51dfcc42430d531ea09f8a2
 
 # The test engine shells out to the openssl CLI (monitor/path-validation).
 # python:slim ships it; this guard fails the build early if a future base
