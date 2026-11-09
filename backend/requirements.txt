@@ -6,6 +6,11 @@
 cryptography>=49.0.0,<50.0.0
 requests>=2.34.2,<3.0.0
 asn1crypto>=1.5.1,<2.0.0
+# certifi is only a transitive dependency (requests/httpx), but the floor is
+# declared here so every build resolves at least the trust-store release that
+# fixes GHSA-6q48-6c7w-9gw2 — the advisory the image CVE scans flagged in
+# 2026.6.17 — instead of whatever a cached layer last resolved.
+certifi>=2026.10.18
 
 # Web framework. The starlette floor sits at its latest advisory-fixed
 # release (2025-26 batch incl. CVE-2024-47874/CVE-2025-54121); pip resolves a

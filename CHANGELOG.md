@@ -13,6 +13,12 @@ to [Semantic Versioning](https://semver.org/).
   when fixable critical CVEs appear (pip re-resolves patched packages; a new
   `apt-get upgrade` layer pulls patched Debian packages), and every
   published image is re-scanned immediately after it builds.
+- **Self-healing loop fixes**, found when the loop first fired for real: the
+  CVE rebuild now skips the Docker layer cache (a fully cached rebuild
+  reused the vulnerable pip layer) and dispatches its own re-scan (a
+  bot-dispatched rebuild emits no `workflow_run` event, so the issue-closing
+  scan never ran). A `certifi>=2026.10.18` floor clears GHSA-6q48-6c7w-9gw2,
+  the fixable critical CVE the scan found in the published image.
 
 - **One-click releases**: a manually-triggered `release-cut` workflow bumps
   the version, sections the CHANGELOG, and opens an auto-merging prep PR;
