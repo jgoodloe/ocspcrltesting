@@ -15,6 +15,11 @@ on:
   schedule:
     - cron: "17 6 * * 1"
   workflow_dispatch:
+    inputs:
+      fresh:
+        description: "Build without the layer cache so pip/apt re-resolve patched packages (set by the CVE-rebuild loop)"
+        type: boolean
+        default: false
 
 concurrency:
   # One in-flight run per ref. Cancel superseded feature-branch/PR runs, but
@@ -89,6 +94,8 @@ jobs:
       # For the GitHub-signed provenance attestation (#78).
       id-token: write
       attestations: write
+      # To dispatch the post-rebuild image-scan on fresh (CVE) rebuilds.
+      actions: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -146,6 +153,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # A fresh dispatch (the CVE-rebuild loop) skips the layer cache:
+          # a fully cache-hit rebuild reuses the old pip/apt layers and
+          # cannot pick up patched packages. cache-to still refreshes the
+          # cache, so the next ordinary build starts from patched layers.
+          no-cache: ${{ inputs.fresh == true }}
           # Supply-chain metadata (#78): BuildKit attaches SLSA provenance and
           # an SPDX SBOM to the image manifest, so `docker buildx imagetools
           # inspect` (and scanners) can see exactly what went in and how.
@@ -162,6 +174,18 @@ jobs:
           subject-name: ghcr.io/${{ github.repository }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+
+      # Close the CVE-rebuild loop: a run dispatched with the GITHUB_TOKEN
+      # emits no workflow_run event, so image-scan's completed-build trigger
+      # never fires for these rebuilds and the cve-rebuild issue would stay
+      # open forever. workflow_dispatch is exempt from that suppression, so
+      # kick the re-scan explicitly; it closes the issue if the image is clean.
+      - name: Trigger post-rebuild scan
+        if: inputs.fresh == true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run image-scan.yml --ref main
 
   # Release CVE gate: scan the just-pushed release image for FIXABLE
   # critical/high CVEs (OS packages and bundled Python packages alike).

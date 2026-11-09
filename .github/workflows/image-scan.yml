@@ -17,13 +17,16 @@
 name: image-scan
 
 # Rebuild-on-patch loop: when the weekly scheduled scan finds FIXABLE
-# critical CVEs in `latest`, it dispatches a rebuild of the build pipeline —
-# pip re-resolves patched packages and the Dockerfile's apt upgrade layer
-# pulls patched Debian packages — and every completed build on main is
-# scanned again via the workflow_run trigger, closing the loop. Only
-# scheduled scans dispatch rebuilds (at most one a week), so a dependency
-# whose fix cannot land (e.g. capped by a floor) alerts via issue instead of
-# rebuilding in circles.
+# critical CVEs in `latest`, it dispatches a cache-skipping rebuild of the
+# build pipeline (fresh=true) so pip and apt actually re-resolve patched
+# packages — a fully cached rebuild would reuse the vulnerable layers.
+# The rebuild dispatches this workflow back when it finishes (a
+# GITHUB_TOKEN-triggered run emits no workflow_run event, so the trigger
+# below cannot see it); ordinary pushes are re-scanned via workflow_run.
+# Either way the post-build scan closes the cve-rebuild issue once clean.
+# Only scheduled scans dispatch rebuilds (at most one a week), so a
+# dependency whose fix cannot land (e.g. capped by a floor) alerts via
+# issue instead of rebuilding in circles.
 on:
   schedule:
     - cron: "31 6 * * 1"
@@ -87,7 +90,7 @@ jobs:
           if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
             echo "" >> body.md
             echo "A rebuild of \`latest\` has been dispatched to pick up the patched packages; the post-build scan will close this issue if it comes back clean. If this issue persists, the fix cannot be picked up automatically (e.g. a version floor caps below it) and needs a look." >> body.md
-            gh workflow run build.yml --ref main
+            gh workflow run build.yml --ref main -f fresh=true
           else
             echo "" >> body.md
             echo "This scan ran after a build, so no automatic rebuild was dispatched (the weekly scan handles that); if these persist, a dependency change is needed." >> body.md
