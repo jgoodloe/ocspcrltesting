@@ -78,7 +78,7 @@ jobs:
             exit 0
           fi
           {
-            echo "Trivy found **$count fixable CRITICAL** vulnerabilities in \\`ghcr.io/$GH_REPO:latest\\`:"
+            echo "Trivy found **$count fixable CRITICAL** vulnerabilities in \`ghcr.io/$GH_REPO:latest\`:"
             echo
             echo '| CVE | package | installed | fixed in |'
             echo '|---|---|---|---|'
@@ -86,7 +86,7 @@ jobs:
           } > body.md
           if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
             echo "" >> body.md
-            echo "A rebuild of \\`latest\\` has been dispatched to pick up the patched packages; the post-build scan will close this issue if it comes back clean. If this issue persists, the fix cannot be picked up automatically (e.g. a version floor caps below it) and needs a look." >> body.md
+            echo "A rebuild of \`latest\` has been dispatched to pick up the patched packages; the post-build scan will close this issue if it comes back clean. If this issue persists, the fix cannot be picked up automatically (e.g. a version floor caps below it) and needs a look." >> body.md
             gh workflow run build.yml --ref main
           else
             echo "" >> body.md
