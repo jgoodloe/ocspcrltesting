@@ -5,6 +5,12 @@ to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+- **GitHub Actions majors landed** after verification: setup-python 7 and
+  setup-node 7 (exercised directly by CI; Python 3.10 confirmed still in
+  the v7 manifest), docker/build-push-action 7.3 (no changes to the
+  inputs/outputs this pipeline uses), dependency-review-action 5, and
+  dependabot/fetch-metadata 3.1 — every SHA pin verified against its
+  upstream tag. Replaces Dependabot #110/#111/#113/#126/#129.
 - **Audited scan exceptions** (`.trivyignore.yaml`): the v1.3.1 gate paused
   on setuptools 70.3.0 — pip's own vendored version pin, whose vulnerable
   module (`PackageIndex`, CVE-2025-47273) pip does not even ship, and which
