@@ -18,7 +18,10 @@ to [Semantic Versioning](https://semver.org/).
   reused the vulnerable pip layer) and dispatches its own re-scan (a
   bot-dispatched rebuild emits no `workflow_run` event, so the issue-closing
   scan never ran). A `certifi>=2026.10.18` floor clears GHSA-6q48-6c7w-9gw2,
-  the fixable critical CVE the scan found in the published image.
+  the fixable critical CVE the scan found in the published image — which
+  lived in two places: site-packages (fixed by the floor) and the copy
+  vendored inside the base image's pip, which the image SBOM exposes and a
+  new pip self-upgrade in the Dockerfile keeps current.
 
 - **One-click releases**: a manually-triggered `release-cut` workflow bumps
   the version, sections the CHANGELOG, and opens an auto-merging prep PR;

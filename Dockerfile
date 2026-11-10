@@ -22,6 +22,12 @@ RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 
 RUN openssl version
 
+# pip's own vendored certifi/urllib3 come from the pinned base image and age
+# with it. The image SBOM (syft) lists those vendored copies, so scanners
+# flag them even when site-packages is fully patched — upgrading pip
+# refreshes them on every rebuild (pip >= 26.3 vendors certifi 2026.10.23).
+RUN pip install --no-cache-dir --upgrade pip
+
 WORKDIR /app
 
 COPY backend/requirements.txt backend/requirements.txt
