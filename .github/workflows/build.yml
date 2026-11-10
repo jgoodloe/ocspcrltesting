@@ -212,6 +212,11 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
     steps:
+      # For .trivyignore.yaml — the audited list of accepted findings.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
       - name: Scan release image for fixable CRITICAL/HIGH CVEs
         id: scan
         run: |
@@ -220,6 +225,7 @@ jobs:
           img="ghcr.io/$GH_REPO:$ver"
           docker run --rm -v "$PWD:/out" aquasec/trivy:latest image \
             --severity CRITICAL,HIGH --ignore-unfixed \
+            --ignorefile /out/.trivyignore.yaml \
             --format json --output /out/gate.json "$img"
           count=$(jq '[.Results[]?.Vulnerabilities[]?] | length' gate.json)
           echo "fixable CRITICAL/HIGH findings in $img: $count"
@@ -231,9 +237,9 @@ jobs:
           {
             echo "The release gate found **$count fixable CRITICAL/HIGH** vulnerabilities in \`$img\`:"
             echo
-            echo '| CVE | severity | package | installed | fixed in |'
-            echo '|---|---|---|---|---|'
-            jq -r '[.Results[]?.Vulnerabilities[]? | "| \(.VulnerabilityID) | \(.Severity) | \(.PkgName) | \(.InstalledVersion) | \(.FixedVersion // "?") |"] | unique | .[]' gate.json
+            echo '| CVE | severity | package | installed | fixed in | where |'
+            echo '|---|---|---|---|---|---|'
+            jq -r '[.Results[]? as $r | $r.Vulnerabilities[]? | "| \(.VulnerabilityID) | \(.Severity) | \(.PkgName) | \(.InstalledVersion) | \(.FixedVersion // "?") | \(.PkgPath // $r.Target) |"] | unique | .[]' gate.json
             echo
             echo "The GitHub Release for \`$GITHUB_REF_NAME\` is **paused** awaiting your decision in the run's *release-approval* deployment review: approve to publish anyway, reject to hold. The image tags already exist on GHCR either way — to ship clean, fix the dependency, bump, and cut a new release."
           } > issue.md

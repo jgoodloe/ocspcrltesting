@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. This project adheres
 to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- **Audited scan exceptions** (`.trivyignore.yaml`): the v1.3.1 gate paused
+  on setuptools 70.3.0 — pip's own vendored version pin, whose vulnerable
+  module (`PackageIndex`, CVE-2025-47273) pip does not even ship, and which
+  every current pip still pins. The ignore file documents that verdict and
+  is applied by the gate and the image scans; finding tables now include a
+  "where" column so vendored ghosts are visible at a glance.
+
 ## v1.3.1
 
 ### Security

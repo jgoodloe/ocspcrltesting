@@ -56,11 +56,17 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
     steps:
+      # For .trivyignore.yaml — the audited list of accepted findings.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
       - name: Scan ghcr latest image
         run: |
           docker run --rm -v "$PWD:/out" aquasec/trivy:latest image \
             --format sarif --output /out/trivy.sarif \
             --severity CRITICAL,HIGH,MEDIUM --ignore-unfixed \
+            --ignorefile /out/.trivyignore.yaml \
             ghcr.io/${{ github.repository }}:latest
 
       - name: Rebuild when critical fixes are available
@@ -68,6 +74,7 @@ jobs:
           set -euo pipefail
           docker run --rm -v "$PWD:/out" aquasec/trivy:latest image \
             --severity CRITICAL --ignore-unfixed \
+            --ignorefile /out/.trivyignore.yaml \
             --format json --output /out/crit.json \
             "ghcr.io/$GH_REPO:latest"
           count=$(jq '[.Results[]?.Vulnerabilities[]?] | length' crit.json)
@@ -83,9 +90,9 @@ jobs:
           {
             echo "Trivy found **$count fixable CRITICAL** vulnerabilities in \`ghcr.io/$GH_REPO:latest\`:"
             echo
-            echo '| CVE | package | installed | fixed in |'
-            echo '|---|---|---|---|'
-            jq -r '[.Results[]?.Vulnerabilities[]? | "| \(.VulnerabilityID) | \(.PkgName) | \(.InstalledVersion) | \(.FixedVersion // "?") |"] | unique | .[]' crit.json
+            echo '| CVE | package | installed | fixed in | where |'
+            echo '|---|---|---|---|---|'
+            jq -r '[.Results[]? as $r | $r.Vulnerabilities[]? | "| \(.VulnerabilityID) | \(.PkgName) | \(.InstalledVersion) | \(.FixedVersion // "?") | \(.PkgPath // $r.Target) |"] | unique | .[]' crit.json
           } > body.md
           if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
             echo "" >> body.md
