@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. This project adheres
 to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## v1.3.1
 
 ### Security
 
