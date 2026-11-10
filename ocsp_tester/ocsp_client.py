@@ -1,6 +1,6 @@
 import base64
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple, Dict, Any, List
 from urllib.parse import urljoin, quote
 
@@ -21,7 +21,9 @@ class OCSPRequestSpec:
     issuer: x509.Certificate
     include_nonce: bool = True
     nonce_len: int = 32  # RFC 9654 recommends >=32
-    hash_algo: hashes.HashAlgorithm = hashes.SHA1()
+    # cryptography 50 removed __hash__ from hash-algorithm instances, so a
+    # shared instance default is rejected by dataclasses; build one per spec.
+    hash_algo: hashes.HashAlgorithm = field(default_factory=hashes.SHA1)
 
 
 @dataclass

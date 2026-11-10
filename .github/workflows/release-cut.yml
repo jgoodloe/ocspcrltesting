@@ -80,6 +80,14 @@ jobs:
       - name: Push release-prep branch and open auto-merging PR
         env:
           NEW: ${{ steps.ver.outputs.version }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        # Prefer RELEASE_TOKEN (the release PAT) for the push, the PR and
+        # auto-merge: events created with the workflow's own GITHUB_TOKEN do
+        # not trigger other workflows, so a bot-created prep PR gets no CI
+        # (GitHub also holds its workflow runs for a manual "Approve and
+        # run") and its auto-merge would not fire release-tag. For the fully
+        # hands-off path the PAT needs Contents AND Pull requests: Read and
+        # write; with less, this falls back to GITHUB_TOKEN and warns.
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -87,13 +95,19 @@ jobs:
           git checkout -b "release-prep/v$NEW"
           git add backend/app/__init__.py CHANGELOG.md
           git commit -m "Prepare release v$NEW"
-          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          tok="${RELEASE_TOKEN:-$GH_TOKEN}"
+          auth=$(printf 'x-access-token:%s' "$tok" | base64 -w0)
           git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth" \
             push origin "HEAD:refs/heads/release-prep/v$NEW"
-          if ! gh pr create --base main --head "release-prep/v$NEW" \
-               --title "Prepare release v$NEW" \
-               --body "Automated release prep (version bump + CHANGELOG section). When this merges, release-tag.yml pushes the v$NEW tag and the build pipeline publishes images and the GitHub Release."; then
-            echo "::error::Could not open the PR — enable 'Allow GitHub Actions to create and approve pull requests' under Settings → Actions → General, then re-run."
+          body="Automated release prep (version bump + CHANGELOG section). When this merges, release-tag.yml pushes the v$NEW tag and the build pipeline publishes images and the GitHub Release."
+          if [ -n "$RELEASE_TOKEN" ] && GH_TOKEN="$RELEASE_TOKEN" gh pr create --base main \
+               --head "release-prep/v$NEW" --title "Prepare release v$NEW" --body "$body"; then
+            GH_TOKEN="$RELEASE_TOKEN" gh pr merge --auto --rebase "release-prep/v$NEW"
+          elif gh pr create --base main --head "release-prep/v$NEW" \
+               --title "Prepare release v$NEW" --body "$body"; then
+            gh pr merge --auto --rebase "release-prep/v$NEW" || true
+            echo "::warning::The prep PR was created with the workflow token: a maintainer must press 'Approve and run' on its CI, and the merge may not trigger release-tag. Add 'Pull requests: Read and write' to the RELEASE_TOKEN PAT for a fully hands-off release."
+          else
+            echo "::error::Could not open the PR — give the RELEASE_TOKEN PAT 'Pull requests: Read and write', or enable 'Allow GitHub Actions to create and approve pull requests' under Settings → Actions → General, then re-run."
             exit 1
           fi
-          gh pr merge --auto --rebase "release-prep/v$NEW"

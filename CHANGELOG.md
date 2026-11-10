@@ -3,6 +3,21 @@
 All notable changes to this project are documented here. This project adheres
 to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Security
+
+- **cryptography 50** (floor 50.0.2): clears CVE-2026-69247, which the
+  v1.3.0 release gate flagged. The 49→50 major needed one code fix: hash
+  algorithm instances are no longer valid as shared dataclass defaults.
+- **setuptools floor 78.1.1** in the image, clearing CVE-2025-47273 (the
+  base image ships an older setuptools than the advisory fix).
+- **Hands-off release prep**: `release-cut` now pushes the prep branch and
+  opens/auto-merges the prep PR with `RELEASE_TOKEN` instead of the
+  workflow token, so the PR gets CI without a manual "Approve and run" and
+  its merge triggers the tag push. The PAT needs *Contents* and
+  *Pull requests: Read and write*.
+
 ## v1.3.0
 
 - **Release CVE gate**: every tagged release image is scanned for fixable

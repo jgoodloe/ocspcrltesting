@@ -3,9 +3,15 @@
 # (cryptography CVE-2024-26130 + bundled-OpenSSL CVE-2024-6119; requests
 # CVE-2024-35195/CVE-2024-47081; authlib/starlette/python-multipart 2025-26
 # advisories — floors at each package's last fixed release).
-cryptography>=49.0.0,<50.0.0
+# cryptography floor at 50.0.2: CVE-2026-69247 (flagged by the v1.3.0
+# release gate) is fixed in 50.0.0.
+cryptography>=50.0.2,<51.0.0
 requests>=2.34.2,<3.0.0
 asn1crypto>=1.5.1,<2.0.0
+# The python:3.14-slim base ships a setuptools older than the fix for
+# CVE-2025-47273 (path traversal in PackageIndex, fixed in 78.1.1); the
+# floor upgrades the image's copy at build time.
+setuptools>=78.1.1
 # certifi is only a transitive dependency (requests/httpx), but the floor is
 # declared here so every build resolves at least the trust-store release that
 # fixes GHSA-6q48-6c7w-9gw2 — the advisory the image CVE scans flagged in
