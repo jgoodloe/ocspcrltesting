@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. This project adheres
 to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## v1.3.2
 
 - **GitHub Actions majors landed** after verification: setup-python 7 and
   setup-node 7 (exercised directly by CI; Python 3.10 confirmed still in
