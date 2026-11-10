@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. This project adheres
 to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## v1.3.0
 
 - **Release CVE gate**: every tagged release image is scanned for fixable
   critical/high CVEs before the GitHub Release publishes. Clean releases
